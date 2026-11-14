@@ -1,0 +1,3 @@
+# Bibliotecas de terceiros (OpenSSL e libxml2) que vão junto só para compilar: o GitHub as deixa
+# fora da conta de linguagens do repositório.
+rust/terceiros/** linguist-vendored

@@ -1,0 +1,37 @@
+{
+  "fonte": "https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/producao-restrita/anexo_i-sefin_adn-dps_nfse-snnfse_prodrest-v1-01-20261020.xlsx",
+  "versao": "Indicadores adicionais do release 1 oficial de 20/10/2026",
+  "consultado_em": "2026-10-23",
+  "operacoes": [
+    {
+      "codigo": "010101",
+      "tipo": "Bem Móvel Material",
+      "local": "Estabelecimento do Prestador/Fornecedor"
+    },
+    {
+      "codigo": "010102",
+      "tipo": "Bem Móvel Material",
+      "local": "Local da Prestação"
+    },
+    {
+      "codigo": "010103",
+      "tipo": "Bem Móvel Material",
+      "local": "Endereço do Destinatário"
+    },
+    {
+      "codigo": "010106",
+      "tipo": "Bem Móvel Material",
+      "local": "Endereço do Tomador/Adquirente"
+    },
+    {
+      "codigo": "020202",
+      "tipo": "Serviço prestado fisicamente sobre bem imóvel",
+      "local": "Localidade do Imóvel"
+    },
+    {
+      "codigo": "020401",
+      "tipo": "Serviços de locação, sublocação, arrendamento, direito de passagem ou permissão de uso, compartilhado ou não, de ferrovia, rodovia, postes, cabos, dutos e condutos de qualquer natureza",
+      "local": "Localidade do Imóvel"
+    }
+  ]
+}

@@ -1,0 +1,445 @@
+{
+  "fonte": "https://dfe-portal.svrs.rs.gov.br/CFF/ClassificacaoTributaria",
+  "consultado_em": "2026-11-13",
+  "criterio": "IndNfse=true e vigencia em 2026-11-13",
+  "classificacoes": [
+    {
+      "cst": "000",
+      "cst_nome": "Tributação integral",
+      "codigo": "000001",
+      "descricao": "Situações tributadas integralmente pelo IBS e CBS."
+    },
+    {
+      "cst": "000",
+      "cst_nome": "Tributação integral",
+      "codigo": "000006",
+      "descricao": "Situações tributadas integralmente pelo IBS e CBS.realizadas por autônomo"
+    },
+    {
+      "cst": "010",
+      "cst_nome": "Tributação com alíquotas uniformes",
+      "codigo": "010001",
+      "descricao": "Operações do FGTS não realizadas pela Caixa Econômica Federal"
+    },
+    {
+      "cst": "010",
+      "cst_nome": "Tributação com alíquotas uniformes",
+      "codigo": "010002",
+      "descricao": "Operações do serviço financeiro"
+    },
+    {
+      "cst": "011",
+      "cst_nome": "Tributação com alíquotas uniformes reduzidas",
+      "codigo": "011003",
+      "descricao": "Intermediação de planos de assistência à saúde"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200001",
+      "descricao": "Serviços de transporte de bens até as zonas de processamento de exportação e bens exportados a partir das zonas de processamento de exportação"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200004",
+      "descricao": "Fornecimento de dispositivos médicos (Anexo XII)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200005",
+      "descricao": "Fornecimento de dispositivos médicos para órgãos da administração pública e entidades de saúde imunes (Anexo IV)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200006",
+      "descricao": "Situação de emergência de saúde pública reconhecida pelo Poder público"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200007",
+      "descricao": "Fornecimento dos dispositivos de acessibilidade próprios para pessoas com deficiência (Anexo XIII)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200008",
+      "descricao": "Fornecimento dos dispositivos de acessibilidade próprios para pessoas com deficiência adquiridos por órgãos da administração pública (Anexo V)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200016",
+      "descricao": "Prestação de serviços de pesquisa e desenvolvimento por Instituição Científica, Tecnológica e de Inovação (ICT)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200017",
+      "descricao": "Operações relacionadas ao FGTS"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200019",
+      "descricao": "Importador dos serviços financeiros contribuinte"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200020",
+      "descricao": "Operação praticada por sociedades cooperativas optantes por regime específico do IBS e CBS"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200021",
+      "descricao": "Serviços de transporte público coletivo de passageiros ferroviário e hidroviário"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200025",
+      "descricao": "Fornecimento dos serviços de educação relacionados ao Programa Universidade para Todos (Prouni)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200026",
+      "descricao": "Locação de imóveis localizados nas zonas reabilitadas"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200027",
+      "descricao": "Operações de locação, cessão onerosa e arrendamento de bens imóveis"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200028",
+      "descricao": "Fornecimento dos serviços de educação (Anexo II)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200029",
+      "descricao": "Fornecimento dos serviços de saúde humana (Anexo III)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200030",
+      "descricao": "Venda dos dispositivos médicos (Anexo IV)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200031",
+      "descricao": "Fornecimento dos dispositivos de acessibilidade próprios para pessoas com deficiência (Anexo V)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200037",
+      "descricao": "Fornecimento de serviços ambientais de conservação ou recuperação da vegetação nativa"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200038",
+      "descricao": "Fornecimento dos insumos agropecuários e aquícolas (Anexo IX)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200039",
+      "descricao": "Fornecimento dos bens e serviços relacionados com produções nacionais artísticas, culturais, de eventos, jornalísticas e audiovisuais (Anexo X)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200040",
+      "descricao": "Fornecimento de serviços de comunicação institucional à administração pública"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200041",
+      "descricao": "Fornecimento de serviço de educação desportiva (art. 141. I)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200042",
+      "descricao": "Fornecimento de serviço de gestão e exploração do desporto (art. 141. II)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200043",
+      "descricao": "Fornecimento à administração pública dos serviços e dos bens relativos à soberania (Anexo XI)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200044",
+      "descricao": "Operações e prestações de serviços de segurança da informação e segurança cibernética desenv por sociedade que tenha sócio brasileiro (Anexo XI)"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200045",
+      "descricao": "Operações relacionadas a projetos de reabilitação urbana de zonas históricas e de áreas críticas de recuperação e reconversão urbanística"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200046",
+      "descricao": "Operações com bens imóveis"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200048",
+      "descricao": "Hotelaria, Parques de Diversão e Parques Temáticos"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200051",
+      "descricao": "Agências de Turismo"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200052",
+      "descricao": "Prestação de serviços de profissões intelectuais"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200054",
+      "descricao": "Fornecimento de bem material pela cooperativa de produção agropecuária a associado não sujeito ao regime regular do IBS e da CBS"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200055",
+      "descricao": "Fornecimento dos serviços com redução de alíquota de 60% realizado por autônomo"
+    },
+    {
+      "cst": "200",
+      "cst_nome": "Alíquota reduzida",
+      "codigo": "200056",
+      "descricao": "Fornecimento dos serviços com redução de alíquota de 30% realizado por autônomo"
+    },
+    {
+      "cst": "221",
+      "cst_nome": "Alíquota fixa proporcional",
+      "codigo": "221001",
+      "descricao": "Locação, cessão onerosa ou arrendamento de bem imóvel com alíquota sobre a receita bruta"
+    },
+    {
+      "cst": "400",
+      "cst_nome": "Isenção",
+      "codigo": "400001",
+      "descricao": "Fornecimento de serviços de transporte público coletivo de passageiros rodoviário e metroviário"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410001",
+      "descricao": "Fornecimento de bonificações quando constem no documento fiscal e que não dependam de evento posterior"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410003",
+      "descricao": "Doações e amostras grátis sem contraprestação em benefício do doador"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410004",
+      "descricao": "Exportações de bens e serviços"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410005",
+      "descricao": "Fornecimentos realizados pela União, pelos Estados, pelo Distrito Federal e pelos Municípios"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410006",
+      "descricao": "Fornecimentos realizados por entidades religiosas e templos de qualquer culto"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410007",
+      "descricao": "Fornecimentos realizados por partidos políticos, entidades sindicais e instituições de educação e de assistência social"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410008",
+      "descricao": "Fornecimentos de livros, jornais, periódicos e do papel destinado a sua impressão"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410009",
+      "descricao": "Fornecimentos de fonogramas e videofonogramas musicais produzidos no Brasil"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410010",
+      "descricao": "Fornecimentos de serviço de comunicação nas modalidades de radiodifusão sonora e de sons e imagens de recepção livre e gratuita"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410012",
+      "descricao": "Fornecimento de condomínio edilício não optante pelo regime regular"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410014",
+      "descricao": "Fornecimento de produtor rural não contribuinte"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410015",
+      "descricao": "Fornecimento por transportador autônomo não contribuinte"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410026",
+      "descricao": "Doações e amostras grátis com anulação de crédito"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410027",
+      "descricao": "Exportação de serviço ou de bem imaterial"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410033",
+      "descricao": "Operações de Fundos de Investimento Imobiliário (FII) e Fundos de Investimento nas Cadeias Produtivas do Agronegócio (Fiagro)"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410035",
+      "descricao": "Fornecimento realizado por nanoempreendedor"
+    },
+    {
+      "cst": "410",
+      "cst_nome": "Imunidade e não incidência",
+      "codigo": "410999",
+      "descricao": "Operações não onerosas sem previsão de tributação, não especificadas anteriormente"
+    },
+    {
+      "cst": "515",
+      "cst_nome": "Diferimento com redução de alíquota",
+      "codigo": "515001",
+      "descricao": "Operações, sujeitas a diferimento, com insumos agropecuários e aquícolas (Anexo IX)"
+    },
+    {
+      "cst": "550",
+      "cst_nome": "Suspensão",
+      "codigo": "550016",
+      "descricao": "Regime Especial de Incentivos para o Desenvolvimento da Infraestrutura"
+    },
+    {
+      "cst": "550",
+      "cst_nome": "Suspensão",
+      "codigo": "550022",
+      "descricao": "Regime Especial de Incentivos para a Produção de Hidrogênio de Baixa Emissão de Carbono (Rehidro)"
+    },
+    {
+      "cst": "800",
+      "cst_nome": "Transferência de crédito",
+      "codigo": "800001",
+      "descricao": "Fusão, cisão ou incorporação"
+    },
+    {
+      "cst": "800",
+      "cst_nome": "Transferência de crédito",
+      "codigo": "800002",
+      "descricao": "Transferência de crédito do associado, inclusive as cooperativas singulares"
+    },
+    {
+      "cst": "811",
+      "cst_nome": "Ajustes",
+      "codigo": "811001",
+      "descricao": "Anulação de Crédito por Saídas Imunes/Isentas"
+    },
+    {
+      "cst": "811",
+      "cst_nome": "Ajustes",
+      "codigo": "811002",
+      "descricao": "Débitos de notas fiscais não processadas na apuração"
+    },
+    {
+      "cst": "811",
+      "cst_nome": "Ajustes",
+      "codigo": "811003",
+      "descricao": "Desenquadramento do Simples Nacional"
+    },
+    {
+      "cst": "820",
+      "cst_nome": "Tributação em documento específico",
+      "codigo": "820001",
+      "descricao": "Documento com informações de fornecimento de serviços de planos de assistência à saúde elencados no art. 234 da Lei Complementar nº214, de 2025"
+    },
+    {
+      "cst": "820",
+      "cst_nome": "Tributação em documento específico",
+      "codigo": "820002",
+      "descricao": "Documento com informações de fornecimento de serviços de planos de assinstência funerária"
+    },
+    {
+      "cst": "820",
+      "cst_nome": "Tributação em documento específico",
+      "codigo": "820003",
+      "descricao": "Documento com informações de fornecimento de serviços de planos de assistência à saúde de animais domésticos"
+    },
+    {
+      "cst": "820",
+      "cst_nome": "Tributação em documento específico",
+      "codigo": "820004",
+      "descricao": "Documento com informações de prestação de serviços de consursos de prognósticos"
+    },
+    {
+      "cst": "820",
+      "cst_nome": "Tributação em documento específico",
+      "codigo": "820006",
+      "descricao": "Documento com informações de fornecimento de serviços de exploração de via"
+    },
+    {
+      "cst": "820",
+      "cst_nome": "Tributação em documento específico",
+      "codigo": "820007",
+      "descricao": "Documento com informações de fornecimento de serviços financeiros"
+    },
+    {
+      "cst": "820",
+      "cst_nome": "Tributação em documento específico",
+      "codigo": "820009",
+      "descricao": "Fornecimentos declarados e tributados em outro documento"
+    }
+  ]
+}

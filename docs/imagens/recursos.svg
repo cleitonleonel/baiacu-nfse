@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 620" width="1280" height="620">
+  <rect width="1280" height="620" rx="28" fill="#F5F3FF"/>
+  <g font-family="Segoe UI, Helvetica Neue, Arial, sans-serif">
+    <rect x="40" y="30" width="285" height="270" rx="22" fill="#FFFFFF" stroke="#E0E7FF" stroke-width="2"/>
+    <circle cx="98" cy="92" r="34" fill="#4F46E5"/>
+    <path d="M102 74 L87 95 H97 L93 110 L109 88 H99 Z" fill="#FFFFFF"/>
+    <text x="66" y="170" font-size="23" font-weight="800" fill="#1E1B4B">Emissão rápida</text>
+    <text x="66" y="206" font-size="16.5" fill="#475569">Só cliente, serviço e valor.</text>
+    <text x="66" y="232" font-size="16.5" fill="#475569">O resto vem do cadastro e</text>
+    <text x="66" y="258" font-size="16.5" fill="#475569">é preenchido sozinho.</text>
+    <rect x="345" y="30" width="285" height="270" rx="22" fill="#FFFFFF" stroke="#E0E7FF" stroke-width="2"/>
+    <circle cx="403" cy="92" r="34" fill="#0D9488"/>
+    <path d="M385 92 Q403 75 421 92 Q403 109 385 92 Z" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="403" cy="92" r="5.5" fill="#FFFFFF"/>
+    <text x="371" y="170" font-size="23" font-weight="800" fill="#1E1B4B">Confira antes</text>
+    <text x="371" y="206" font-size="16.5" fill="#475569">Veja a nota pronta antes de</text>
+    <text x="371" y="232" font-size="16.5" fill="#475569">enviar e corrija o que o</text>
+    <text x="371" y="258" font-size="16.5" fill="#475569">programa apontar.</text>
+    <rect x="650" y="30" width="285" height="270" rx="22" fill="#FFFFFF" stroke="#E0E7FF" stroke-width="2"/>
+    <circle cx="708" cy="92" r="34" fill="#7C3AED"/>
+    <rect x="692" y="77" width="32" height="28" rx="4" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="708" cy="91" r="6.5" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M698 105 v4 M718 105 v4" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="676" y="170" font-size="23" font-weight="800" fill="#1E1B4B">Cofre de notas</text>
+    <text x="676" y="206" font-size="16.5" fill="#475569">As notas que você emitiu e</text>
+    <text x="676" y="232" font-size="16.5" fill="#475569">as que recebeu, guardadas e</text>
+    <text x="676" y="258" font-size="16.5" fill="#475569">fáceis de encontrar.</text>
+    <rect x="955" y="30" width="285" height="270" rx="22" fill="#FFFFFF" stroke="#E0E7FF" stroke-width="2"/>
+    <circle cx="1013" cy="92" r="34" fill="#0284C7"/>
+    <rect x="996" y="80" width="34" height="24" rx="4" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M998 83 L1013 94 L1028 83" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="981" y="170" font-size="23" font-weight="800" fill="#1E1B4B">E-mail automático</text>
+    <text x="981" y="206" font-size="16.5" fill="#475569">PDF e XML vão para o</text>
+    <text x="981" y="232" font-size="16.5" fill="#475569">cliente numa mensagem</text>
+    <text x="981" y="258" font-size="16.5" fill="#475569">com a sua cara.</text>
+    <rect x="40" y="320" width="285" height="270" rx="22" fill="#FFFFFF" stroke="#E0E7FF" stroke-width="2"/>
+    <circle cx="98" cy="382" r="34" fill="#EA580C"/>
+    <rect x="82" y="366" width="16" height="32" rx="2" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="100" y="377" width="14" height="21" rx="2" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M87 373 h6 M87 381 h6 M87 389 h6" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="66" y="460" font-size="23" font-weight="800" fill="#1E1B4B">Várias empresas</text>
+    <text x="66" y="496" font-size="16.5" fill="#475569">Cuide de vários CNPJs e de</text>
+    <text x="66" y="522" font-size="16.5" fill="#475569">quantos clientes quiser,</text>
+    <text x="66" y="548" font-size="16.5" fill="#475569">tudo num lugar só.</text>
+    <rect x="345" y="320" width="285" height="270" rx="22" fill="#FFFFFF" stroke="#E0E7FF" stroke-width="2"/>
+    <circle cx="403" cy="382" r="34" fill="#16A34A"/>
+    <path d="M416 367 L390 397" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="394" cy="373" r="5.5" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="412" cy="391" r="5.5" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="371" y="460" font-size="23" font-weight="800" fill="#1E1B4B">Reforma Tributária</text>
+    <text x="371" y="496" font-size="16.5" fill="#475569">Pronto para o IBS e a CBS</text>
+    <text x="371" y="522" font-size="16.5" fill="#475569">e para as novas regras</text>
+    <text x="371" y="548" font-size="16.5" fill="#475569">dos aluguéis.</text>
+    <rect x="650" y="320" width="285" height="270" rx="22" fill="#FFFFFF" stroke="#E0E7FF" stroke-width="2"/>
+    <circle cx="708" cy="382" r="34" fill="#E11D48"/>
+    <rect x="694" y="379" width="28" height="21" rx="4" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M700 379 v-6 a8 8 0 0 1 16 0 v6" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M708 387 v5" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="676" y="460" font-size="23" font-weight="800" fill="#1E1B4B">Seguro e privado</text>
+    <text x="676" y="496" font-size="16.5" fill="#475569">Tudo cifrado no seu PC,</text>
+    <text x="676" y="522" font-size="16.5" fill="#475569">com senha e usuários com</text>
+    <text x="676" y="548" font-size="16.5" fill="#475569">níveis de acesso.</text>
+    <rect x="955" y="320" width="285" height="270" rx="22" fill="#FFFFFF" stroke="#E0E7FF" stroke-width="2"/>
+    <circle cx="1013" cy="382" r="34" fill="#475569"/>
+    <path d="M997 398 H1029" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M1004 392 v-10 M1013 392 v-20 M1022 392 v-14" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="981" y="460" font-size="23" font-weight="800" fill="#1E1B4B">Relatórios e backup</text>
+    <text x="981" y="496" font-size="16.5" fill="#475569">Exporte para Excel e PDF e</text>
+    <text x="981" y="522" font-size="16.5" fill="#475569">faça cópia de segurança</text>
+    <text x="981" y="548" font-size="16.5" fill="#475569">em um clique.</text>
+  </g>
+</svg>

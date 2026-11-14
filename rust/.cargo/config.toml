@@ -1,0 +1,10 @@
+# SQLCipher (rusqlite, bundled-sqlcipher) precisa de um libcrypto. Usa-se o OpenSSL 3.5.4
+# do projeto, ligado ESTATICAMENTE: terceiros/openssl/libcrypto.lib
+# é a cópia de lib/VC/x64/MD/libcrypto_static.lib com o nome que o libsqlite3-sys procura —
+# nenhuma DLL do OpenSSL acompanha o programa.
+[env]
+OPENSSL_LIB_DIR = { value = "terceiros/openssl", relative = true }
+OPENSSL_INCLUDE_DIR = { value = "terceiros/openssl/include", relative = true }
+# O TLS das conexões (crate openssl) usa o mesmo OpenSSL, também estático: terceiros/openssl/libssl.lib
+# é a cópia de lib/VC/x64/MD/libssl_static.lib.
+OPENSSL_STATIC = "1"

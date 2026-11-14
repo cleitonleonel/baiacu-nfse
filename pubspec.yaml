@@ -1,0 +1,23 @@
+name: emissor_nfse
+description: "Baiacu NFS-e"
+publish_to: 'none'
+version: 1.0.0+0
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  ffi: ^2.2.0
+  flutter_svg: ^2.3.0
+  flutter_quill: 11.5.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/

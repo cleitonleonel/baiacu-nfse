@@ -1,0 +1,87 @@
+//! Raiz do aplicativo — a pasta GRAVÁVEL onde moram database/, logs/ e configs/.
+//!
+//! Empacotado: a pasta do executável. Em desenvolvimento: a pasta informada em
+//! `definir_raiz()` (a tela passa a raiz do projeto).
+//!
+//! A raiz não pode mudar de forma: o banco usa o caminho RELATIVO a ela como CHAVE das tabelas
+//! `config` e `contador` (ex.: "pessoas/prestador/123/config_tomador.ini" — só um nome de
+//! chave; a pasta pessoas/ não existe em disco).
+use std::path::{Component, Path, PathBuf};
+use std::sync::RwLock;
+
+static RAIZ: RwLock<Option<PathBuf>> = RwLock::new(None);
+
+/// Define a raiz. Chamar uma vez, antes de qualquer outra coisa do núcleo.
+pub fn definir_raiz(raiz: impl AsRef<Path>) {
+    *RAIZ.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(normalizar(raiz.as_ref()));
+}
+
+/// A raiz gravável. Sem `definir_raiz()`, a pasta do executável.
+pub fn raiz() -> PathBuf {
+    if let Some(r) = RAIZ.read().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
+        return r.clone();
+    }
+    let padrao = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."));
+    normalizar(&padrao)
+}
+
+/// Caminho de um recurso somente-leitura (configs/, assets/) sob a raiz.
+pub fn recurso(partes: &[&str]) -> PathBuf {
+    let mut p = raiz();
+    for parte in partes {
+        p.push(parte);
+    }
+    p
+}
+
+/// Absoluto e sem "." / "..", SEM tocar no disco (o `Path.resolve()` do Python para caminhos
+/// que podem não existir).
+pub fn normalizar(p: &Path) -> PathBuf {
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(p)
+    };
+    let mut out = PathBuf::new();
+    for c in abs.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            outro => out.push(outro.as_os_str()),
+        }
+    }
+    out
+}
+
+/// Chave lógica de um arquivo: caminho relativo à raiz, com '/'. (Um caminho fora da raiz
+/// vira o absoluto com '/' — não acontece no programa.)
+pub fn chave_logica(caminho: &str) -> String {
+    let limpo = caminho.replace('\\', "/");
+    let p = Path::new(&limpo);
+    let abs = if p.is_absolute() {
+        normalizar(p)
+    } else {
+        normalizar(&raiz().join(p))
+    };
+    let raiz = raiz();
+    match abs.strip_prefix(&raiz) {
+        Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
+        Err(_) => abs.to_string_lossy().replace('\\', "/"),
+    }
+}
+
+/// Caminho absoluto de um caminho que pode vir relativo à raiz.
+pub fn absoluto(caminho: &str) -> PathBuf {
+    let limpo = caminho.replace('\\', "/");
+    let p = Path::new(&limpo);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        raiz().join(p)
+    }
+}

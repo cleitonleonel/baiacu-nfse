@@ -1,0 +1,39 @@
+{
+  "fonte": "https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/rtc/nota-tecnica-009-se-cgnfs-e-v-1-01.pdf",
+  "versao": "NT 009 release 1: 99.02 a 99.04 em homologacao desde 2026-10-20; 99.05 somente previa",
+  "consultado_em": "2026-10-23",
+  "tributacao_nacional": [
+    {
+      "codigo": "990201",
+      "descricao": "Operações com Bens Imateriais Não Classificados em Itens Anteriores"
+    },
+    {
+      "codigo": "990301",
+      "descricao": "Locação de Bens Imóveis"
+    },
+    {
+      "codigo": "990302",
+      "descricao": "Cessão Onerosa de Bens Imóveis"
+    },
+    {
+      "codigo": "990303",
+      "descricao": "Arrendamento de Bens Imóveis"
+    },
+    {
+      "codigo": "990304",
+      "descricao": "Servidão, Cessão de Uso ou de Espaço de Bens Imóveis (quando não caracterizem operações tributáveis pelo ISSQN)"
+    },
+    {
+      "codigo": "990305",
+      "descricao": "Permissão de Uso ou Direito de Passagem de Bens Imóveis (quando não caracterizem operações tributáveis pelo ISSQN)"
+    },
+    {
+      "codigo": "990401",
+      "descricao": "Locação de Bens Móveis"
+    },
+    {
+      "codigo": "990501",
+      "descricao": "Operações Condominiais (taxas e demais valores cobrados pelo condomínio edilício)"
+    }
+  ]
+}

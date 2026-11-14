@@ -1,0 +1,22 @@
+# Rust
+/rust/target/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+/build/
+
+# IDE / sistema
+.idea/
+.vscode/
+*.iml
+Thumbs.db
+Desktop.ini
+
+# Certificados e segredos (nunca versionar)
+*.pfx
+*.p12
+*.pem
+*.key
+.env

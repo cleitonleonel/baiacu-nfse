@@ -1,0 +1,347 @@
+{
+  "versao": 1,
+  "elementos": {
+    "TamanhosAcesso.botaoGeral": {
+      "altura": 40.0,
+      "largura": 300.0
+    },
+    "Acesso.texto1": {
+      "altura": 23.0,
+      "tamanhoFonte": 20.0
+    },
+    "Acesso.texto2": {
+      "texto": "Entre com seu usuário e senha",
+      "oculto": true,
+      "tamanhoFonte": 13.0
+    },
+    "TamanhosAcesso.campoUsuario": {
+      "largura": 300.0
+    },
+    "TamanhosAcesso.campoSenha": {
+      "largura": 300.0
+    },
+    "TamanhosEmitir.campoValorDoServico": {
+      "largura": 150.0,
+      "altura": 60.0
+    },
+    "TamanhosEmitir.campoDescontoCondicionado": {
+      "largura": 150.0
+    },
+    "TamanhosEmitir.rotuloDadosDaEmissao": {
+      "tamanhoFonte": 14.0
+    },
+    "TamanhosEmitir.campoDescricaoDoServico": {
+      "largura": 1000.0
+    },
+    "TamanhosAcesso.botaoAcao": {
+      "tamanhoFonte": 16.0
+    },
+    "TamanhosTributosEmissao.rotuloMaisCamposDoServicoTributacao": {
+      "negrito": false,
+      "tamanhoFonte": 14.0
+    },
+    "TamanhosTributosEmissao.campoRotulo": {
+      "largura": 440.0
+    },
+    "TamanhosTributosEmissao.campoCTribMun": {
+      "largura": 165.0
+    },
+    "TamanhosTributosEmissao.campoLocalDePrestacaoCMun": {
+      "largura": 165.0,
+      "texto": "Local prestação (cMun)",
+      "oculto": false
+    },
+    "TamanhosEmitir.rotuloT:Situação tributária": {
+      "tamanhoFonte": 13.0
+    },
+    "TamanhosEmitir.rotuloT:IBS/CBS": {
+      "tamanhoFonte": 13.0
+    },
+    "TamanhosEmitir.rotuloT:Cálculo próprio de PIS/COFINS": {
+      "tamanhoFonte": 13.0
+    },
+    "TamanhosEmitir.rotuloT:Retenções (IRRF / Contribuições Sociais)": {
+      "tamanhoFonte": 13.0,
+      "texto": "Retenções de IRRF/Contribuições Sociais",
+      "oculto": false
+    },
+    "TamanhosEmitir.rotuloT:Totais aproximados dos tributos (Lei 12.741)": {
+      "tamanhoFonte": 13.0,
+      "texto": "Totais aproximados dos tributos",
+      "oculto": false
+    },
+    "TamanhosTributosEmissao.campoSituacaoTributariaDoPISCOFINSCST": {
+      "largura": 450.0
+    },
+    "TamanhosTributosEmissao.campoTipoDeRetencaoDoPISCOFINSCSLL": {
+      "largura": 250.0
+    },
+    "Grupo.emitir.lin.6": {},
+    "Grupo.emitir.lin.5": {},
+    "TamanhosTributosEmissao.campoDestinatarioEOProprioAdquirente": {
+      "largura": 200.0
+    },
+    "TamanhosTributosEmissao.campoSituacaoTributariaIBSCBSCST": {
+      "largura": 250.0
+    },
+    "Grupo.emitir.lin.10": {},
+    "Grupo.emitir.lin.7": {},
+    "TamanhosTributosEmissao.campoIndicadorDaOperacaoCIndOp": {
+      "largura": 450.0
+    },
+    "TamanhosTributosEmissao.campoClassificacaoTributariaIBSCBS": {
+      "largura": 300.0
+    },
+    "Grupo.emitir.lin.12": {},
+    "Grupo.emitir.lin.11": {},
+    "Grupo.emitir.lin.14": {},
+    "Grupo.emitir.lin.13": {},
+    "Grupo.emitir.lin.16": {},
+    "Grupo.emitir.lin.15": {},
+    "Grupo.emitir.col.9": {},
+    "Checkbox.emitir.1": {
+      "largura": 320.0
+    },
+    "TamanhosEmitir.campoDescontoIncondicionado": {
+      "altura": 45.0,
+      "largura": 150.0
+    },
+    "TamanhosEmitir.botaoEmitirNFSE": {
+      "tamanhoFonte": 13.0
+    },
+    "TamanhosEmitir.botaoPreVisualizarSemEnviar": {
+      "tamanhoFonte": 13.0,
+      "texto": "Pré-visualizar",
+      "oculto": false
+    },
+    "TamanhosDadosCliente.campoBairro": {
+      "largura": 170.0
+    },
+    "TamanhosDadosCliente.campoInscricaoMunicipal": {
+      "largura": 145.0
+    },
+    "TamanhosDadosCliente.campoCidade": {
+      "largura": 300.0
+    },
+    "TamanhosDadosCliente.campoNumero": {
+      "largura": 90.0
+    },
+    "TamanhosDadosCliente.campoComplemento": {
+      "largura": 170.0
+    },
+    "TamanhosDadosCliente.campoGrupo": {
+      "largura": 245.0
+    },
+    "TamanhosServicosTributos.campoLocalPrestacaoCMun": {
+      "largura": 165.0
+    },
+    "TamanhosDadosCliente.campoCMunIBGE": {
+      "texto": "Cód. Muni. (cMun)",
+      "oculto": false
+    },
+    "TamanhosServicosTributos.campoCTribMun": {
+      "texto": "Cód. Tribut. Mun. (cTribMun)",
+      "oculto": false,
+      "largura": 165.0
+    },
+    "TamanhosServicosTributos.campoDescricaoDoServico": {
+      "largura": 700.0
+    },
+    "TamanhosServicosTributos.campoSituacaoTributariaDoPISCOFINSCST": {
+      "largura": 380.0
+    },
+    "TamanhosServicosTributos.campoTipoDeRetencaoDoPISCOFINSCSLL": {
+      "largura": 310.0
+    },
+    "TamanhosServicosTributos.campoDestinatarioEOProprioAdquirente": {
+      "largura": 240.0
+    },
+    "TamanhosServicosTributos.campoSituacaoTributariaIBSCBSCST": {
+      "largura": 620.0
+    },
+    "TamanhosDadosCliente.rotuloT:Retenções (IRRF / Contribuições Sociais)": {
+      "texto": "Retenções de IRRF/Contribuições Sociais",
+      "oculto": false
+    },
+    "TamanhosDadosCliente.rotuloT:Totais aproximados dos tributos (Lei 12.741)": {
+      "texto": "Totais aproximados dos tributos",
+      "oculto": false
+    },
+    "TamanhosServicosTributos.rotuloOValorDoServicoEInformadoNaTela": {
+      "oculto": true
+    },
+    "TamanhosTributosEmissao.rotuloEnderecoEIdentificacaoDoClienteSaoEditadosNa": {
+      "oculto": true
+    },
+    "TamanhosEmitir.campoGrupo": {
+      "largura": 240.0
+    },
+    "TamanhosEmitir.campoServico": {
+      "largura": 290.0
+    },
+    "TamanhosEmitir.rotuloEmitirNFSE": {
+      "tamanhoFonte": 18.0
+    },
+    "TamanhosPrestadores.rotuloDepoisDeCriarPreenchaOsTributosDoPrestador": {
+      "texto": "Depois de criar: preencha os tributos do prestador e confira os dados em Configurações › Prestador.",
+      "oculto": false
+    },
+    "Grupo.usuarios.col.3": {},
+    "Grupo.usuarios.col.4": {},
+    "Grupo.usuarios.lin.3": {},
+    "TamanhosConfiguracoes.campoNomeDeExibicaoListaDePrestadores": {
+      "texto": "Nome de exibição",
+      "oculto": false
+    },
+    "TamanhosNavegacao.campoPrestador": {
+      "largura": 420.0
+    },
+    "Grupo.config.col.6": {},
+    "TamanhosConfiguracoes.rotuloArquivoCertNomePfx": {
+      "oculto": true
+    },
+    "TamanhosConfiguracoes.campoProximoNoDPS": {
+      "largura": 160.0
+    },
+    "TamanhosClientes.campoGrupo": {
+      "largura": 240.0
+    },
+    "TamanhosClientes.campoPesquisarCliente": {
+      "largura": 600.0
+    },
+    "TamanhosConsultar.campoPeriodo2": {
+      "largura": 220.0
+    },
+    "TamanhosConsultar.campoAmbiente2": {
+      "largura": 150.0
+    },
+    "TamanhosConfiguracoes.rotuloT2:Cores do fundo e dos cartões, para o sistema inteiro. Clique em Editar para mexer: a tela acompanha na hora, e a mudança só fica valendo depois de Salvar.": {
+      "texto": "Cores do fundo e dos cartões, para o sistema inteiro. Clique em Editar para modificar.",
+      "oculto": false
+    },
+    "TamanhosConfiguracoes.rotuloDica:cartoes": {
+      "texto": "Janelas e menus.",
+      "oculto": false
+    },
+    "Grupo.config.lin.15": {},
+    "TamanhosConfiguracoes.campoSenhaAppPassword": {
+      "largura": 290.0
+    },
+    "TamanhosConfiguracoes.campoNomeDoRemetente": {
+      "largura": 290.0
+    },
+    "TamanhosConfiguracoes.campoAssunto": {
+      "largura": 625.0
+    },
+    "TamanhosConfiguracoes.campoSeguranca": {
+      "largura": 180.0
+    },
+    "TamanhosConfiguracoes.rotuloT2:Marcado: a DANFSe abre no leitor que vem com o programa (tela cheia, sem instalar nada). Desmarcado: abre no leitor de PDF padrão do Windows. Vale na hora, para todos os usuários.": {
+      "texto": "Marcado: a DANFSe abre no leitor que vem com o programa.\nDesmarcado: a DANFSe abre no leitor de PDF padrão do Windows.",
+      "oculto": false
+    },
+    "TamanhosConfiguracoes.rotuloT2:Tudo o que o programa guarda está em dois bancos, na pasta abaixo: dados.db (cadastros, certificados, usuários, séries e numerações) e notas.db (os XMLs do Cofre). Os dois são criptografados por inteiro e só abrem com a senha de um usuário ou com a SENHA MESTRA. O backup é um arquivo .zip com os dados, com as notas ou com os dois. O dados.key, ao lado deles, não precisa de backup: é refeito a partir do banco sempre que faltar.": {
+      "texto": "Backup dos bancos de dados. Cadastros, certificados, usuários, séries, numerações e arquivos xml.",
+      "oculto": false
+    },
+    "TamanhosConfiguracoes.rotuloT2:O Cofre grava cada lote por inteiro ou não grava nada: queda de internet, travamento ou falta de luz no meio não estragam o banco. Uma vez por sessão o arquivo é conferido e, no máximo uma vez por dia, uma cópia de segurança é refeita ao lado dele (database/notas.db.bak). Se o banco sumir ou estragar, a cópia volta sozinha e a sincronização seguinte traz o que faltar.": {
+      "texto": "O Cofre grava cada lote recebido por inteiro ou não grava nada: queda de internet, travamento ou falta de luz no meio não estragam o banco. Uma vez por sessão o arquivo é conferido e, no máximo uma vez por dia, uma cópia de segurança é refeita ao lado dele (database/notas.db.bak). Se o banco sumir ou estragar, a cópia volta sozinha e a sincronização seguinte traz o que faltar.",
+      "oculto": false
+    },
+    "TamanhosConfiguracoes.campoAmbientes": {
+      "largura": 250.0
+    },
+    "TamanhosConfiguracoes.rotuloT2:Com o programa aberto, o Cofre busca sozinho as notas novas, sem anel nem janela: só avisa quando chega alguma. Sem internet, tenta de novo em 5, 10, 20 e 40 minutos e nada fica gravado pela metade.": {
+      "texto": "Com o programa aberto, o Cofre busca sozinho as notas novas.",
+      "oculto": false
+    },
+    "Grupo.registros.lin.4": {},
+    "Grupo.config.lin.25": {
+      "ordem": [
+        "Grupo.config.lin.25.item.Checkbox.config.3",
+        "Grupo.config.lin.25.item.TamanhosConfiguracoes.campoIntervalo"
+      ]
+    },
+    "Grupo.config.col.1": {},
+    "Grupo.config.lin.24": {},
+    "TamanhosConfiguracoes.rotuloT2:Quais ambientes o Cofre consulta no ADN — vale para o botão Sincronizar e para a sincronização automática.": {
+      "texto": "Quais ambientes e prestadores o Cofre consulta no ADN — vale para o botão Sincronizar e para a sincronização automática.",
+      "oculto": false
+    },
+    "TamanhosConfiguracoes.rotuloT2:\"Todos os prestadores\" = todos os que o usuário logado enxerga e que têm certificado. Cada um é consultado no ambiente em uso DELE (ou nos dois).": {
+      "oculto": true
+    },
+    "TamanhosClientes.rotuloClientesTomadores": {
+      "tamanhoFonte": 18.0,
+      "texto": "Clientes (Tomadores)",
+      "oculto": false
+    },
+    "TamanhosConsultar.rotuloConsultarNFSEEmitidas": {
+      "tamanhoFonte": 18.0
+    },
+    "TamanhosCofre.rotuloCofreDeNFSE": {
+      "tamanhoFonte": 18.0
+    },
+    "Grupo.config.cartao.Sincronização do Cofre": {},
+    "TamanhosConfiguracoes.campoPrestadores": {
+      "largura": 210.0
+    },
+    "TamanhosConfiguracoes.campoIntervalo": {
+      "largura": 120.0
+    },
+    "TamanhosConsultar.rotuloRotulo2:Cliente": {
+      "texto": "Nome / Razão Social",
+      "oculto": false,
+      "tamanhoFonte": 13.0,
+      "negrito": true,
+      "alinhamento": "center"
+    },
+    "TamanhosConsultar.rotuloRotulo2:vServ": {
+      "texto": "Valor Serviço",
+      "oculto": false,
+      "alinhamento": "start",
+      "negrito": true,
+      "tamanhoFonte": 13.0
+    },
+    "TamanhosConsultar.rotuloRotulo2:vLíq": {
+      "texto": "Valor Líquido",
+      "oculto": false,
+      "alinhamento": "start",
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    },
+    "TamanhosConsultar.rotuloRotulo2:NFS-e": {
+      "alinhamento": "left",
+      "negrito": true,
+      "tamanhoFonte": 13.0
+    },
+    "TamanhosConsultar.rotuloRotulo2:Documento": {
+      "tamanhoFonte": 13.0,
+      "negrito": true,
+      "alinhamento": "center",
+      "largura": 73.6484375
+    },
+    "TamanhosConsultar.rotuloRotulo2:Grupo": {
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    },
+    "TamanhosConsultar.rotuloRotulo2:Processada em": {
+      "tamanhoFonte": 13.0,
+      "negrito": true,
+      "alinhamento": "left"
+    },
+    "TamanhosConsultar.rotuloRotulo2:Ambiente": {
+      "tamanhoFonte": 13.0,
+      "alinhamento": "left",
+      "negrito": true
+    },
+    "TamanhosConsultar.rotuloRotulo2:Status": {
+      "negrito": true,
+      "tamanhoFonte": 13.0
+    },
+    "TamanhosConsultar.rotuloRotulo2:Ações": {
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    }
+  }
+}
