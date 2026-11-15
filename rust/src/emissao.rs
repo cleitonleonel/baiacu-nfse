@@ -228,7 +228,7 @@ impl Registro {
 /// Os namespaces do XML (endpoints.ini [xml]): (NFS-e, assinatura digital).
 pub fn namespaces() -> Res<(String, String)> {
     let cfg = Ini::de_arquivo(
-        &caminhos::raiz().join("configs").join("endpoints.ini"),
+        &caminhos::recurso(&["configs"]).join("endpoints.ini"),
         false,
     )?;
     let ou = |v: String, padrao: &str| if v.is_empty() { padrao.to_string() } else { v };
@@ -432,7 +432,7 @@ pub fn preview_emissao_com(
 // --------------------------------------------------------------------------------------------- //
 /// URL base da SEFIN do ambiente (endpoints.ini [ambiente_N] sefin_base_url).
 fn url_base(tp_amb: &str) -> Res<String> {
-    let caminho = caminhos::raiz().join("configs").join("endpoints.ini");
+    let caminho = caminhos::recurso(&["configs"]).join("endpoints.ini");
     if !caminho.is_file() {
         return Err(Erro::nao_encontrado(format!(
             "Não foi possível ler endpoints.ini: {}",
@@ -1959,7 +1959,7 @@ pub fn montar_cancelamento(
 }
 
 fn pasta_dos_esquemas() -> Res<(PathBuf, String)> {
-    let cfg = Ini::de_arquivo(&caminhos::raiz().join("configs").join("paths.ini"), false)?;
+    let cfg = Ini::de_arquivo(&caminhos::recurso(&["configs"]).join("paths.ini"), false)?;
     let base = cfg.val("schemas", "dir", "schemas");
     let versao = cfg.val("schemas", "versao", "1.01");
     Ok((

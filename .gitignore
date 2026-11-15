@@ -20,3 +20,19 @@ Desktop.ini
 *.pem
 *.key
 .env
+
+# Testes locais e artefatos gerados ficam em NFSe/extras ou NFSe/temp.
+/test/
+/tests/
+/rust/tests/
+/rust/atualizador/tests/
+/rust/atualizador/testes_locais/
+**/target/
+/windows/flutter/ephemeral/
+__pycache__/
+*.pyc
+*.pdb
+*.exe
+*.dll
+*.lib
+*.dpapi

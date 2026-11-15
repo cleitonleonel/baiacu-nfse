@@ -1,6 +1,6 @@
-//! Raiz do aplicativo — a pasta GRAVÁVEL onde moram database/, logs/ e configs/.
+//! Raiz gravável dos bancos e logs. Recursos distribuídos são resolvidos por `programa()`.
 //!
-//! Empacotado: a pasta do executável. Em desenvolvimento: a pasta informada em
+//! Instalação: ProgramData; portátil: pasta do executável. Em desenvolvimento: pasta informada em
 //! `definir_raiz()` (a tela passa a raiz do projeto).
 //!
 //! A raiz não pode mudar de forma: o banco usa o caminho RELATIVO a ela como CHAVE das tabelas
@@ -28,14 +28,24 @@ pub fn raiz() -> PathBuf {
     normalizar(&padrao)
 }
 
-/// Caminho de um recurso somente-leitura (configs/, assets/) sob a raiz.
+/// Caminho de um recurso somente-leitura (configs/, assets/) sob a pasta do programa.
 pub fn recurso(partes: &[&str]) -> PathBuf {
-    let mut p = raiz();
+    let mut p = programa();
     for parte in partes {
         p.push(parte);
     }
     p
 }
+
+/// Recursos ficam junto do executável instalado; no desenvolvimento, na raiz informada.
+pub fn programa() -> PathBuf {
+    let exe = std::env::current_exe().unwrap_or_default();
+    if exe.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("Baiacu NFS-e.exe")) {
+        exe.parent().unwrap_or(Path::new(".")).to_path_buf()
+    } else { raiz() }
+}
+
+pub fn instalado_compartilhado() -> bool { programa().join("installed.marker").is_file() }
 
 /// Absoluto e sem "." / "..", SEM tocar no disco (o `Path.resolve()` do Python para caminhos
 /// que podem não existir).
@@ -81,6 +91,8 @@ pub fn absoluto(caminho: &str) -> PathBuf {
     let p = Path::new(&limpo);
     if p.is_absolute() {
         p.to_path_buf()
+    } else if limpo.starts_with("configs/") || limpo.starts_with("bin/") || limpo.starts_with("docs/") {
+        programa().join(p)
     } else {
         raiz().join(p)
     }

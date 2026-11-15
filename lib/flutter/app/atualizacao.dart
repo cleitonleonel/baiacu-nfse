@@ -1,6 +1,6 @@
 // Atualização do programa: a procura sozinha ao entrar (no máximo uma vez por dia), o botão
 // "Atualização disponível" no topo e a janela que baixa, confere e instala a versão nova.
-// O trabalho (GitHub, download, SHA-256 e o script de instalação) é do núcleo: atualizacao.rs.
+// O núcleo consulta a release, baixa o pacote e aciona o atualizador.
 import 'package:flutter/material.dart';
 
 import '../kit/flet.dart';
@@ -11,6 +11,9 @@ import 'sistema.dart';
 final atualizacaoDisponivel = ValueNotifier<Map<String, dynamic>?>(null);
 
 const _verde = Color(0xFF15803D);
+const _cursorAtualizacao = WidgetStatePropertyAll<MouseCursor>(
+  SystemMouseCursors.click,
+);
 
 /// Procura versão nova. [automatica]: a procura sozinha ao entrar (respeita o intervalo, a
 /// opção desligada e a versão pulada, e nunca mostra erro). Manual: sempre consulta e diz o
@@ -56,6 +59,7 @@ class BotaoAtualizacao extends StatelessWidget {
             child: Tooltip(
               message: 'Clique para ver o que mudou e atualizar.',
               child: InkWell(
+                mouseCursor: SystemMouseCursors.click,
                 borderRadius: BorderRadius.circular(20),
                 onTap: () => abrirAtualizacao(app),
                 child: Container(
@@ -132,12 +136,7 @@ void abrirAtualizacao(App app) {
               color: esquema.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: SingleChildScrollView(
-              child: SelectableText(
-                notas.isEmpty ? 'Melhorias e correções.' : notas,
-                style: const TextStyle(fontSize: Letra.texto, height: 1.4),
-              ),
-            ),
+            child: _NotasDaVersao(notas: notas),
           ),
           if (!instalavel) ...[
             const SizedBox(height: 10),
@@ -155,6 +154,7 @@ void abrirAtualizacao(App app) {
     },
     acoes: (context) => [
       TextButton(
+        style: const ButtonStyle(mouseCursor: _cursorAtualizacao),
         onPressed: () {
           try {
             ja<Object?>('atualizacao.configurar', {'pular': versao});
@@ -172,6 +172,7 @@ void abrirAtualizacao(App app) {
         mainAxisSize: MainAxisSize.min,
         children: [
           OutlinedButton(
+            style: const ButtonStyle(mouseCursor: _cursorAtualizacao),
             onPressed: () => app.fecharEsta(d),
             child: const Text('Depois'),
           ),
@@ -179,6 +180,7 @@ void abrirAtualizacao(App app) {
           if (instalavel)
             FilledButton.icon(
               style: FilledButton.styleFrom(
+                enabledMouseCursor: SystemMouseCursors.click,
                 backgroundColor: _verde,
                 foregroundColor: Colors.white,
               ),
@@ -191,6 +193,7 @@ void abrirAtualizacao(App app) {
             )
           else
             FilledButton.icon(
+              style: const ButtonStyle(mouseCursor: _cursorAtualizacao),
               onPressed: () {
                 try {
                   abrirEndereco('${info['pagina'] ?? ''}');
@@ -216,29 +219,75 @@ void _baixarEInstalar(App app, String versao) {
   if (_baixando) return;
   _baixando = true;
   final h = app.toastProgresso('Baixando a versão $versao…');
+  final andamento = ValueNotifier<Map<String, Object?>>({
+    'etapa': 'Preparando o download…',
+    'percentual': null,
+  });
+  final janela = Dialogo(
+    largura: 480,
+    titulo: (_) => LinhaTitulo([textoTitulo('Baixando a atualização')]),
+    conteudo: (_) => ValueListenableBuilder<Map<String, Object?>>(
+      valueListenable: andamento,
+      builder: (context, estado, _) {
+        final percentual = estado['percentual'] as num?;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '${estado['etapa']}',
+              style: const TextStyle(fontSize: Letra.texto),
+            ),
+            const SizedBox(height: 16),
+            LinearProgressIndicator(
+              value: percentual == null
+                  ? null
+                  : (percentual / 100).clamp(0.0, 1.0),
+            ),
+            const SizedBox(height: 8),
+            if (percentual != null)
+              Text('${percentual.round()}%', textAlign: TextAlign.right),
+          ],
+        );
+      },
+    ),
+  );
+  app.mostrarDialogo(janela);
   app.emSegundoPlano(() async {
     try {
-      await Nucleo.chamarAcompanhando<Object?>(
+      final baixada = await Nucleo.chamarAcompanhando<Map>(
         'atualizacao.baixar',
-        const {},
+        {'versao': versao},
         aoAvisar: (aviso) {
           if (aviso is Map && aviso['etapa'] != null) {
+            andamento.value = {
+              'etapa': '${aviso['etapa']}',
+              'percentual': aviso['percentual'],
+            };
             app.toastAndamento(h, '${aviso['etapa']}…');
           }
         },
       );
-      app.toastFim(h, 'Versão $versao baixada e conferida.');
+      final versaoBaixada = '${baixada['versao']}';
+      app.fecharEsta(janela);
+      app.toastFim(h, 'Versão $versaoBaixada baixada e conferida.');
       // Fora do trabalho em segundo plano: fechar o programa espera ele terminar.
-      app.agendar(const Duration(milliseconds: 100), () => _confirmar(app, versao));
+      app.agendar(
+        const Duration(milliseconds: 100),
+        () => _confirmar(app, versaoBaixada),
+      );
     } catch (e) {
       app.toastFim(h, 'Não foi possível atualizar: $e', erro: true);
     } finally {
+      app.fecharEsta(janela);
+      andamento.dispose();
       _baixando = false;
     }
   });
 }
 
 void _confirmar(App app, String versao) {
+  var instalando = false;
   late final Dialogo d;
   d = Dialogo(
     largura: 480,
@@ -250,11 +299,13 @@ void _confirmar(App app, String versao) {
     ),
     acoes: (_) => [
       OutlinedButton(
+        style: const ButtonStyle(mouseCursor: _cursorAtualizacao),
         onPressed: () => app.fecharEsta(d),
         child: const Text('Instalar depois'),
       ),
       FilledButton.icon(
         style: FilledButton.styleFrom(
+          enabledMouseCursor: SystemMouseCursors.click,
           backgroundColor: _verde,
           foregroundColor: Colors.white,
         ),
@@ -266,14 +317,21 @@ void _confirmar(App app, String versao) {
             );
             return;
           }
+          if (instalando) return;
+          instalando = true;
+          final progresso = app.toastProgresso('Preparando a instalação…');
           try {
-            ja<Object?>('atualizacao.instalar');
+            await chamar<Object?>('atualizacao.instalar', {'versao': versao});
+            app.toastFim(progresso, 'Atualizador iniciado.');
           } catch (e) {
-            app.toast('$e', erro: true);
+            instalando = false;
+            app.toastFim(progresso, '$e', erro: true);
             return;
           }
           app.fecharEsta(d);
-          registrar('Atualização para a versão $versao: fechando para instalar.');
+          registrar(
+            'Atualização para a versão $versao: fechando para instalar.',
+          );
           await app.fechar();
         },
         icon: const Icon(Icons.restart_alt, size: 16),
@@ -284,4 +342,34 @@ void _confirmar(App app, String versao) {
     idLayout: 'Janela.atualizacao.confirmar',
   );
   app.mostrarDialogo(d);
+}
+
+class _NotasDaVersao extends StatefulWidget {
+  const _NotasDaVersao({required this.notas});
+  final String notas;
+  @override
+  State<_NotasDaVersao> createState() => _NotasDaVersaoState();
+}
+
+class _NotasDaVersaoState extends State<_NotasDaVersao> {
+  final _rolagem = ScrollController();
+  @override
+  void dispose() {
+    _rolagem.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scrollbar(
+    controller: _rolagem,
+    thumbVisibility: true,
+    child: SingleChildScrollView(
+      controller: _rolagem,
+      padding: const EdgeInsets.only(right: 12),
+      child: SelectableText(
+        widget.notas.isEmpty ? 'Melhorias e correções.' : widget.notas,
+        style: const TextStyle(fontSize: Letra.texto, height: 1.4),
+      ),
+    ),
+  );
 }

@@ -568,7 +568,7 @@ pub(crate) fn copiar_paginas(origem: &Connection, destino: &mut Connection) -> R
 pub(crate) struct ArquivoCopia(pub PathBuf);
 impl ArquivoCopia {
     pub(crate) fn novo(prefixo: &str) -> Res<Self> {
-        let pasta = caminhos::raiz().join("temp").join("copias");
+        let pasta = std::env::temp_dir().join("BaiacuNFSe").join("copias");
         fs::create_dir_all(&pasta)?;
         let nome = format!(
             "{prefixo}_{}_{}.db",

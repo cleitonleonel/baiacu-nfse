@@ -174,7 +174,7 @@ fn hoje_iso() -> String {
 }
 
 fn auto_versao() -> Res<String> {
-    let caminho = caminhos::raiz().join("configs").join("paths.ini");
+    let caminho = caminhos::recurso(&["configs"]).join("paths.ini");
     if !caminho.exists() {
         return Err(Erro::nao_encontrado(format!(
             "Não foi possível ler o config: {}",

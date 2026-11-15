@@ -1,6 +1,7 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
+#include <shellapi.h>
 
 #include <string>
 
@@ -10,8 +11,82 @@
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  auto arguments = GetCommandLineArguments();
+  const bool probe = arguments.size() == 1 &&
+                     arguments.front() == "--baiacu-validar-inicializacao";
+  if (probe) {
+    // Evita diálogos do Windows se uma DLL da versão candidata não carregar.
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+  }
   wchar_t oculta_env[8] = {};
-  const bool oculta = GetEnvironmentVariableW(L"NFSE_OCULTA", oculta_env, 8) > 0 && oculta_env[0] == L'1';
+  const bool oculta = probe ||
+      (GetEnvironmentVariableW(L"NFSE_OCULTA", oculta_env, 8) > 0 && oculta_env[0] == L'1');
+  // Não abre uma segunda sessão enquanto o serviço substitui os binários.
+  wchar_t exe_path[32768] = {};
+  GetModuleFileNameW(nullptr, exe_path, 32768);
+  std::wstring directory(exe_path);
+  directory.resize(directory.find_last_of(L'\\'));
+  unsigned long long update_hash = 14695981039346656037ull;
+  for (const wchar_t* c = exe_path; *c; ++c) {
+    update_hash ^= static_cast<unsigned long long>((*c >= L'A' && *c <= L'Z') ? *c + 32 : *c);
+    update_hash *= 1099511628211ull;
+  }
+  const std::wstring update_mutex = L"Global\\BaiacuNFSe.Update." + std::to_wstring(update_hash);
+  HANDLE updating = OpenMutexW(SYNCHRONIZE, FALSE, update_mutex.c_str());
+  const bool update_active = updating || GetLastError() == ERROR_ACCESS_DENIED;
+  if (updating) CloseHandle(updating);
+  const bool pending = GetFileAttributesW((directory + L"\\update.pending").c_str()) != INVALID_FILE_ATTRIBUTES;
+  if (probe && (!update_active || !pending)) return EXIT_FAILURE;
+  if (update_active && !probe) {
+    if (!oculta) MessageBoxW(nullptr, L"Aguarde a atualização ou recuperação do Baiacu terminar.", L"Baiacu NFS-e", MB_OK | MB_ICONINFORMATION);
+    return EXIT_SUCCESS;
+  }
+  if (!probe && GetFileAttributesW((directory + L"\\installed.marker").c_str()) != INVALID_FILE_ATTRIBUTES) {
+    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (scm) {
+      SC_HANDLE service = OpenServiceW(scm, L"BaiacuNFSeUpdate", SERVICE_QUERY_STATUS);
+      if (service) {
+        SERVICE_STATUS status{};
+        if (QueryServiceStatus(service, &status) && status.dwCurrentState != SERVICE_STOPPED) {
+          CloseServiceHandle(service);
+          CloseServiceHandle(scm);
+          if (!oculta) MessageBoxW(nullptr, L"O Baiacu está sendo atualizado. Aguarde a conclusão; ele abrirá novamente.", L"Baiacu NFS-e", MB_OK | MB_ICONINFORMATION);
+          return EXIT_SUCCESS;
+        }
+        CloseServiceHandle(service);
+      }
+      CloseServiceHandle(scm);
+    }
+  }
+  wchar_t program_files[32768] = {};
+  GetEnvironmentVariableW(L"ProgramW6432", program_files, 32768);
+  if (program_files[0] == 0) GetEnvironmentVariableW(L"ProgramFiles", program_files, 32768);
+  if (_wcsicmp(directory.c_str(), (std::wstring(program_files) + L"\\Baiacu NFS-e").c_str()) == 0 &&
+      GetFileAttributesW((directory + L"\\installed.marker").c_str()) == INVALID_FILE_ATTRIBUTES) {
+    MessageBoxW(nullptr, L"Esta instalação precisa ser migrada para o novo modelo de segurança.\n\nExecute o instalador atualizado (setup.exe). Ele preservará e migrará seus bancos para ProgramData.", L"Baiacu NFS-e", MB_OK | MB_ICONINFORMATION);
+    return EXIT_SUCCESS;
+  }
+  if (pending && !probe) {
+    const bool installed = GetFileAttributesW((directory + L"\\installed.marker").c_str()) != INVALID_FILE_ATTRIBUTES;
+    if (MessageBoxW(nullptr, L"Uma atualização foi interrompida. O Baiacu precisa restaurar a versão anterior antes de abrir.\n\nDeseja recuperar agora?", L"Baiacu NFS-e", MB_OKCANCEL | MB_ICONINFORMATION) != IDOK) return EXIT_SUCCESS;
+    const std::wstring helper = directory + L"\\service\\baiacu-atualizador.exe";
+    SHELLEXECUTEINFOW info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_NOCLOSEPROCESS;
+    info.lpVerb = installed ? L"runas" : L"open";
+    info.lpFile = helper.c_str();
+    info.lpParameters = L"--recover";
+    info.nShow = SW_HIDE;
+    if (!ShellExecuteExW(&info) || !info.hProcess) return EXIT_SUCCESS;
+    WaitForSingleObject(info.hProcess, INFINITE);
+    DWORD result = 1;
+    GetExitCodeProcess(info.hProcess, &result);
+    CloseHandle(info.hProcess);
+    if (result != 0 || GetFileAttributesW((directory + L"\\update.pending").c_str()) != INVALID_FILE_ATTRIBUTES) return EXIT_SUCCESS;
+    // Reinicia o executável já restaurado, na sessão e com os privilégios originais.
+    ShellExecuteW(nullptr, L"open", exe_path, nullptr, directory.c_str(), SW_SHOWNORMAL);
+    return EXIT_SUCCESS;
+  }
   StartupGuard starting;
   if (starting.duplicate()) return EXIT_SUCCESS;
   wchar_t reabrir_env[8] = {};
@@ -48,10 +123,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // Skia evita a inicializacao lenta do Impeller neste aplicativo Windows.
   project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
 
-  std::vector<std::string> command_line_arguments =
-      GetCommandLineArguments();
-
-  project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
+  project.set_dart_entrypoint_arguments(std::move(arguments));
 
   // NFSE_OCULTA=1 (conferencia de partida do compilar_exe.py): a janela nasce fora da tela e nunca e mostrada.
   FlutterWindow window(project, oculta, &starting);

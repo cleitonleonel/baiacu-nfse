@@ -34,8 +34,8 @@ pub fn executar(metodo: &str, a: &Value, avisar: crate::despacho::Avisar) -> Opt
             a.get("pular").and_then(Value::as_str),
         ),
         "atualizacao.verificar" => crate::atualizacao::verificar(logico(a, "automatica")),
-        "atualizacao.baixar" => crate::atualizacao::baixar(avisar),
-        "atualizacao.instalar" => crate::atualizacao::instalar(),
+        "atualizacao.baixar" => crate::atualizacao::baixar(a["versao"].as_str(), avisar),
+        "atualizacao.instalar" => crate::atualizacao::instalar(a["versao"].as_str()),
         // ---- aparência ------------------------------------------------------------------ //
         "aparencia.carregar" => {
             let (fundo, cartoes) = aparencia::carregar();

@@ -120,7 +120,7 @@ impl OrdemXsd {
 }
 
 fn caminho_do_xsd_de_ordem(outra_versao: Option<&str>) -> Res<PathBuf> {
-    let arquivo = caminhos::raiz().join("configs").join("paths.ini");
+    let arquivo = caminhos::recurso(&["configs"]).join("paths.ini");
     if !arquivo.is_file() {
         return Err(Erro::nao_encontrado(format!(
             "Não foi possível ler o arquivo: {}",

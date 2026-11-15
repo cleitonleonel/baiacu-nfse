@@ -4,7 +4,16 @@ fn main() {
         println!("cargo:rustc-link-lib={lib}");
     }
     // libxml2 2.11.9 estática (validação contra o XSD).
+    println!("cargo:rerun-if-env-changed=BAIACU_NATIVE_LIBS");
     let aqui = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-    println!("cargo:rustc-link-search=native={aqui}/terceiros/libxml2");
+    let libs = std::env::var_os("BAIACU_NATIVE_LIBS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::Path::new(&aqui).join("../../extras/terceiros"));
+    let libxml2 = libs.join("libxml2");
+    println!(
+        "cargo:rerun-if-changed={}",
+        libxml2.join("libxml2s.lib").display()
+    );
+    println!("cargo:rustc-link-search=native={}", libxml2.display());
     println!("cargo:rustc-link-lib=static=libxml2s");
 }

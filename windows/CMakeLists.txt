@@ -72,7 +72,7 @@ target_link_options(${BINARY_NAME} PRIVATE "/DELAYLOAD:${NFSE_FLUTTER_DLL}")
 foreach(plugin ${FLUTTER_PLUGIN_LIST})
   target_link_options(${BINARY_NAME} PRIVATE "/DELAYLOAD:$<TARGET_FILE_NAME:${plugin}_plugin>")
 endforeach(plugin)
-target_link_libraries(${BINARY_NAME} PRIVATE delayimp)
+target_link_libraries(${BINARY_NAME} PRIVATE delayimp advapi32 shell32)
 
 
 # === Installation ===
@@ -99,13 +99,19 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
 
 # Nucleo em Rust (regras do programa): compilado pelo cargo e instalado com as outras DLLs.
 set(NUCLEO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../rust")
+set(NUCLEO_TARGET_DIR "$ENV{CARGO_TARGET_DIR}")
+if(NOT NUCLEO_TARGET_DIR)
+  set(NUCLEO_TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../extras/cache/target_cargo")
+endif()
 add_custom_target(nucleo_rust ALL
-  COMMAND cargo build --release --locked --lib
+  COMMAND cargo build --release --locked --workspace --target-dir "${NUCLEO_TARGET_DIR}"
   WORKING_DIRECTORY "${NUCLEO_DIR}"
   COMMENT "Compilando o nucleo em Rust"
   VERBATIM)
 add_dependencies(${BINARY_NAME} nucleo_rust)
-install(FILES "${NUCLEO_DIR}/target/release/nucleo.dll"
+install(FILES "${NUCLEO_TARGET_DIR}/release/baiacu-atualizador.exe"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/service" COMPONENT Runtime)
+install(FILES "${NUCLEO_TARGET_DIR}/release/nucleo.dll"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
 install(FILES "${NUCLEO_DIR}/recursos/danfse/LICENSE" "${NUCLEO_DIR}/recursos/danfse/LICENSE-QR" "${NUCLEO_DIR}/recursos/danfse/ORIGEM.md"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/licencas" COMPONENT Runtime)

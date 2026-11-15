@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <img src="docs/imagens/baiacu-nfse-demo-completo.gif" alt="Demonstração do Baiacu NFS-e: entrada, emissão, cofre de notas, PDF e e-mail" width="100%">
+</p>
+
+<p align="center">
   <b>Emita, envie e guarde as notas fiscais de serviço da sua empresa sem complicação.</b><br>
   Você cadastra seus clientes uma vez e, a partir daí, cada nota sai em segundos e chega no e-mail do cliente na hora.
 </p>
@@ -149,13 +153,13 @@ Sim. O Cofre de notas busca no Ambiente Nacional as notas emitidas para o seu CN
 <details>
 <summary><b>Como recebo as versões novas?</b></summary>
 <br>
-O programa procura versão nova sozinho, uma vez por dia. Quando houver, aparece um botão verde no topo: um clique baixa, confere e instala, e o programa abre de novo com tudo no lugar.
+O programa procura versão nova sozinho, uma vez por dia. Quando houver, aparece um botão verde no topo. O pacote é autenticado por assinatura Ed25519 e instalado por um serviço sob demanda. O programa só reabre após a conclusão; se a instalação for interrompida, detecta a atualização pendente e oferece recuperar a versão anterior antes de carregar o núcleo. A recuperação de uma instalação compartilhada pode solicitar administrador.
 </details>
 
 <details>
 <summary><b>Várias pessoas usam o mesmo computador. Funciona?</b></summary>
 <br>
-Funciona. O programa fica instalado para todos os usuários do Windows, inclusive os criados depois, e ninguém precisa de senha de administrador para usar ou atualizar. Cada pessoa entra com o próprio login no programa, com o nível de acesso dela. Para proteger os dados, ele só fica aberto por uma pessoa de cada vez naquele computador.
+Funciona. O programa fica protegido em Program Files, com bancos compartilhados em ProgramData. O uso normal e as atualizações pelo serviço não pedem administrador; instalar, reparar um serviço ausente/desativado ou recuperar uma atualização interrompida pode exigir elevação. Cada pessoa entra com o próprio login no programa, com o nível de acesso dela. Para proteger os dados, ele só fica aberto por uma pessoa de cada vez naquele computador.
 </details>
 
 <details>
@@ -196,3 +200,6 @@ O Baiacu NFS-e é feito com carinho e distribuído de graça, sem anúncios e se
 > ⚠️ Envie cada moeda **somente pela rede indicada**. Uma rede diferente pode fazer a doação se perder.
 
 <sub>© 2026 williamlala. Código-fonte disponível sob a [licença do Baiacu NFS-e](LICENSE.md). O programa inclui o leitor SumatraPDF (GPLv3), OpenSSL (Apache-2.0) e libxml2 (MIT). O leiaute da DANFSe é baseado no BrazilFiscalReport (LGPL-3.0).</sub>
+
+
+O ZIP é portátil: extraia numa pasta em que você possa gravar. Os bancos ficam em `database/` junto do executável, sem instalar serviço. Os downloads de atualização ficam no TEMP do usuário. Não copie o marcador `installed.marker` de uma instalação para o ZIP. Para migrar uma instalação antiga em Program Files, execute uma vez o novo instalador; apenas sobrepor o ZIP não migra os bancos nem corrige as permissões.

@@ -26,4 +26,4 @@ Ao enviar uma contribuição, você concorda com a seção 4 da [licença](LICEN
 ## Compilar
 
 - **Rust** (estável) e **Flutter 3.44.8**, no Windows 10 ou 11 com o Visual Studio (C++).
-- As bibliotecas do OpenSSL e da libxml2 já estão em `rust/terceiros/`.
+- No projeto local, as bibliotecas estáticas ficam em `NFSe/extras/terceiros/`. Para outra disposição, informe `OPENSSL_LIB_DIR` e `BAIACU_NATIVE_LIBS`. Os cabeçalhos e licenças ficam em `rust/terceiros/`.

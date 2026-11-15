@@ -81,7 +81,7 @@ pub fn expandir_molde(molde: &str, valores: &[(&str, &str)]) -> String {
 }
 
 pub(crate) fn paths_ini() -> Res<(PathBuf, Ini)> {
-    let caminho = caminhos::raiz().join("configs").join("paths.ini");
+    let caminho = caminhos::recurso(&["configs"]).join("paths.ini");
     if !caminho.is_file() {
         return Err(Erro::nao_encontrado(format!(
             "Não foi possivel ler o arquivo: {}",

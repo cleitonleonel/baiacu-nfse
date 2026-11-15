@@ -98,9 +98,10 @@ enum _Tela {
 
 /// Decide e mostra a tela de acesso; chama [aoEntrar] com o usuário autenticado.
 class TelaAcesso extends StatefulWidget {
-  const TelaAcesso({super.key, required this.aoEntrar});
+  const TelaAcesso({super.key, required this.aoEntrar, this.aoPreparar});
 
   final ValueChanged<Usuario> aoEntrar;
+  final VoidCallback? aoPreparar;
 
   @override
   State<TelaAcesso> createState() => _TelaAcessoState();
@@ -130,7 +131,14 @@ class _TelaAcessoState extends State<TelaAcesso> {
     } else {
       tela = _Tela.login;
     }
-    if (mounted) setState(() => _tela = tela);
+    if (!mounted) return;
+    setState(() => _tela = tela);
+    final confirmar = widget.aoPreparar;
+    if (confirmar != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) confirmar();
+      });
+    }
   }
 
   void _ir(_Tela tela) => setState(() => _tela = tela);

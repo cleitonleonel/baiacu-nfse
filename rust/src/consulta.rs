@@ -315,7 +315,7 @@ pub fn listar_municipios() -> Vec<(String, String, String)> {
     if let Some(m) = guardado.as_ref() {
         return m.clone();
     }
-    let arquivo = caminhos::raiz().join("configs").join("municipios.json");
+    let arquivo = caminhos::recurso(&["configs"]).join("municipios.json");
     let do_arquivo = std::fs::read(&arquivo)
         .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())

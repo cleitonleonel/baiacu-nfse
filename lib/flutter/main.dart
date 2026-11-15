@@ -12,15 +12,59 @@ import 'estilo.dart';
 import 'editor_layout.dart';
 import 'tema.dart';
 
-/// Raiz do programa (database/, logs/, configs/): a pasta do executável quando instalado; em
+/// Raiz dos dados: ProgramData na instalação; pasta do executável no ZIP portátil. Em
 /// desenvolvimento, a variável NFSE_RAIZ aponta para a raiz do projeto.
 String _raiz() {
   final dev = Platform.environment['NFSE_RAIZ'] ?? '';
-  return dev.isNotEmpty ? dev : File(Platform.resolvedExecutable).parent.path;
+  if (dev.isNotEmpty) return dev;
+  final pasta = File(Platform.resolvedExecutable).parent.path;
+  if (File('$pasta/installed.marker').existsSync()) {
+    final dados = Platform.environment['ProgramData'];
+    if (dados == null || dados.isEmpty) {
+      throw StateError(
+        'Não foi possível localizar ProgramData. Repare a instalação do Baiacu.',
+      );
+    }
+    return '$dados/Baiacu NFS-e';
+  }
+  return pasta;
 }
 
-void main() {
+void main(List<String> args) {
   LigacaoComEscala.iniciar();
+  if (args.length == 1 && args.single == '--baiacu-validar-inicializacao') {
+    final dados = Directory.systemTemp.createTempSync('baiacu-partida-');
+    Never terminar(int codigo) {
+      try {
+        dados.deleteSync(recursive: true);
+      } on FileSystemException {
+        exit(1);
+      }
+      exit(codigo);
+    }
+
+    FlutterError.onError = (erro) {
+      FlutterError.presentError(erro);
+      terminar(1);
+    };
+    WidgetsBinding.instance.platformDispatcher.onError = (erro, pilha) {
+      stderr.writeln('$erro\n$pilha');
+      terminar(1);
+    };
+    Nucleo.iniciar(dados.path);
+    runApp(
+      RepaintBoundary(
+        child: EmissorApp(
+          aoPrepararAcesso: () async {
+            await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
+            // Código reservado ao teste de partida. Uma saída normal não confirma a versão.
+            terminar(42);
+          },
+        ),
+      ),
+    );
+    return;
+  }
   Nucleo.iniciar(_raiz());
   Nucleo.chamar<Object?>('registro.registrar', {
     'nome': 'app',
@@ -30,7 +74,9 @@ void main() {
 }
 
 class EmissorApp extends StatefulWidget {
-  const EmissorApp({super.key});
+  const EmissorApp({super.key, this.aoPrepararAcesso});
+
+  final VoidCallback? aoPrepararAcesso;
 
   @override
   State<EmissorApp> createState() => _EmissorAppState();
@@ -118,7 +164,9 @@ class _EmissorAppState extends State<EmissorApp> with WidgetsBindingObserver {
       ],
       // Janela pequena: a tela inteira encolhe por igual (ver escala.dart).
       builder: (context, child) => EditorLayout(
-        raiz: _raiz(),
+        raiz:
+            Platform.environment['NFSE_RAIZ'] ??
+            File(Platform.resolvedExecutable).parent.path,
         child: NaEscala(child: child!),
       ),
       home: Scaffold(
@@ -131,7 +179,10 @@ class _EmissorAppState extends State<EmissorApp> with WidgetsBindingObserver {
                 children: [
                   Expanded(
                     child: app == null
-                        ? TelaAcesso(aoEntrar: _entrou)
+                        ? TelaAcesso(
+                            aoEntrar: _entrou,
+                            aoPreparar: widget.aoPrepararAcesso,
+                          )
                         : Casca(key: ObjectKey(app), app: app),
                   ),
                 ],

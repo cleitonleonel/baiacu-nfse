@@ -125,7 +125,8 @@ Future<void> abrirPdfNativo(String caminho) async {
   if (!pdf.existsSync()) {
     throw FileSystemException('PDF nao encontrado', pdf.path);
   }
-  final raiz = ja<String>('nucleo.raiz');
+  final raiz = Platform.environment['NFSE_RAIZ'] ??
+      File(Platform.resolvedExecutable).parent.path;
   final exe = File('$raiz\\bin\\sumatrapdf\\SumatraPDF.exe').absolute;
   if (!exe.existsSync()) {
     throw FileSystemException('SumatraPDF nao encontrado', exe.path);

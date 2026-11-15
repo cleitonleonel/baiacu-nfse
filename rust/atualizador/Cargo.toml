@@ -1,0 +1,23 @@
+[package]
+name = "baiacu-atualizador"
+version = "1.0.0"
+edition = "2024"
+
+[features]
+default = []
+testes-locais = []
+
+[dependencies]
+base64 = "0.23"
+ed25519-dalek = "3"
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+ureq = { version = "3", features = ["json"] }
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Environment", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
