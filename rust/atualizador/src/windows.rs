@@ -204,20 +204,64 @@ fn wait_app(process: &OwnedHandle) -> Result<()> {
     }
     Ok(())
 }
-fn download(agent: &ureq::Agent, url: &str, dest: &Path, limit: u64) -> Result<()> {
+fn progress(
+    root: &Path,
+    version: &str,
+    pid: u32,
+    action: &str,
+    percent: u64,
+    stage: &str,
+    ready: bool,
+) -> Result<()> {
+    let value = serde_json::json!({"versao":version,"pid":pid,"acao":action,"percentual":percent,"etapa":stage,"pronto":ready});
+    let temp = root.join("service/progress.tmp");
+    fs::write(&temp, serde_json::to_vec(&value)?)?;
+    fs::rename(temp, root.join("service/progress.json"))?;
+    Ok(())
+}
+fn download(
+    agent: &ureq::Agent,
+    url: &str,
+    dest: &Path,
+    limit: u64,
+    mut report: impl FnMut(u64, u64) -> Result<()>,
+) -> Result<()> {
     use std::io::Read;
     if !url.starts_with("https://github.com/williamlala/baiacu-nfse/releases/download/") {
         return Err("URL de release inválida".into());
     }
     let mut response = agent.get(url).call()?;
+    let total = response
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let mut input = response.body_mut().as_reader().take(limit + 1);
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(dest)?;
-    if std::io::copy(&mut input, &mut file)? > limit {
-        return Err("Download maior que o limite".into());
+    let mut buf = [0u8; 65536];
+    let mut read = 0;
+    let mut last = Instant::now();
+    loop {
+        let n = input.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        read += n as u64;
+        if read > limit {
+            return Err("Download maior que o limite".into());
+        }
+        file.write_all(&buf[..n])?;
+        if last.elapsed() >= Duration::from_millis(200) {
+            report(read, total)?;
+            last = Instant::now();
+        }
     }
+    file.sync_all()?;
+    report(read, total)?;
     Ok(())
 }
 fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> Result<()> {
@@ -245,14 +289,70 @@ fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> 
         .ok_or("Processo ausente")?
         .parse()?;
     let process = open_app(pid, &root)?;
-    let token = user_token(&process)?;
+    let action = args
+        .get(3)
+        .and_then(|v| v.to_str())
+        .ok_or("Operação ausente")?;
+    if !["prepare", "install"].contains(&action) {
+        return Err("Operação inválida".into());
+    }
     let old = fs::read_to_string(root.join("release-version.txt"))?;
     if update::version(desired)? <= update::version(old.trim())? {
         return Err("Versão antiga recusada".into());
     }
-    // O cliente só fecha após o serviço confirmar que já tem o processo e o token.
+    let prepared = root.join("service/prepared");
+    if action == "install" {
+        update::no_links(&prepared)?;
+        let manifest = update::verify(
+            &fs::read(prepared.join("release.sig.json"))?,
+            update::PUBLIC_KEY,
+            desired,
+        )?;
+        // Confirma o processo antes de pedir seu encerramento. O pacote já foi autenticado
+        // na preparação; a extração abaixo reconfere seu hash, sem novo download.
+        let token = user_token(&process)?;
+        running()?;
+        wait_app(&process)?;
+        let install_area = tempfile::Builder::new()
+            .prefix("apply-")
+            .tempdir_in(root.join("service"))?;
+        update::verify_prepared(&prepared, update::PUBLIC_KEY, desired)?;
+        let source = update::extract(
+            &prepared.join("release.zip"),
+            &install_area.path().join("novo"),
+            &manifest,
+        )?;
+        let result = update::install(&source, &root, || {
+            crate::startup_probe::check(&root, Some(&token))
+        });
+        if result.is_ok() {
+            let _ = fs::remove_dir_all(&prepared);
+        }
+        return result;
+    }
+    if update::verify_prepared(&prepared, update::PUBLIC_KEY, desired).is_ok() {
+        progress(
+            &root,
+            desired,
+            pid,
+            action,
+            100,
+            "Pacote já preparado e verificado",
+            true,
+        )?;
+        running()?;
+        return Ok(());
+    }
+    progress(
+        &root,
+        desired,
+        pid,
+        action,
+        0,
+        "Consultando a release",
+        false,
+    )?;
     running()?;
-    wait_app(&process)?;
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(300)))
         .build()
@@ -288,20 +388,63 @@ fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> 
         &url(&format!("{file}.sig.json"))?,
         &signature,
         16384,
+        |_, _| Ok(()),
     )?;
     let manifest = update::verify(&fs::read(signature)?, update::PUBLIC_KEY, desired)?;
-    if args
-        .get(3)
-        .is_some_and(|sha| sha.to_str() != Some(&manifest.sha256))
-    {
-        return Err("O pacote publicado mudou. Baixe a atualização novamente.".into());
+    let sha_file = temp.path().join("release.sha256");
+    download(
+        &agent,
+        &url(&format!("{file}.sha256"))?,
+        &sha_file,
+        1024,
+        |_, _| Ok(()),
+    )?;
+    if fs::read_to_string(sha_file)?.split_whitespace().next() != Some(manifest.sha256.as_str()) {
+        return Err("SHA-256 publicado diverge do manifesto assinado".into());
     }
     let zip = temp.path().join("release.zip");
-    download(&agent, &url(&file)?, &zip, update::MAX_ZIP)?;
-    let source = update::extract(&zip, &temp.path().join("novo"), &manifest)?;
-    update::install(&source, &root, || {
-        crate::startup_probe::check(&root, Some(&token))
-    })
+    download(
+        &agent,
+        &url(&file)?,
+        &zip,
+        update::MAX_ZIP,
+        |read, total| {
+            progress(
+                &root,
+                desired,
+                pid,
+                action,
+                (read.min(total) * 90).checked_div(total).unwrap_or(0),
+                "Baixando o pacote na área protegida",
+                false,
+            )
+        },
+    )?;
+    progress(
+        &root,
+        desired,
+        pid,
+        action,
+        92,
+        "Verificando e extraindo o pacote",
+        false,
+    )?;
+    update::extract(&zip, &temp.path().join("novo"), &manifest)?;
+    if prepared.exists() {
+        update::no_links(&prepared)?;
+        fs::remove_dir_all(&prepared)?;
+    }
+    let stage = temp.keep();
+    fs::rename(&stage, &prepared)?;
+    progress(
+        &root,
+        desired,
+        pid,
+        action,
+        100,
+        "Pacote verificado e pronto para instalar",
+        true,
+    )
 }
 fn service_main(args: Vec<OsString>) {
     let Ok(handle) = service_control_handler::register(SERVICE, |control| match control {
@@ -378,7 +521,7 @@ pub fn run() -> Result<()> {
             if hex::decode(update::PUBLIC_KEY.trim())?.len() != 32 {
                 return Err("Chave pública não configurada".into());
             }
-            let _ = io::stdout().write_all(b"startup-probe-v1\n");
+            let _ = io::stdout().write_all(b"protected-download-v2\n");
             Ok(())
         }
         Some("--verify") => {

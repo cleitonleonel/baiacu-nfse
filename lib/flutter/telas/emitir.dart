@@ -18,6 +18,7 @@ import '../kit/formatos.dart';
 import '../kit/menu_suspenso.dart' show aquecerMenuSuspenso;
 import '../tema.dart';
 import 'previa_emissao.dart';
+import 'cliente_form.dart' show abrirCliente;
 
 /// Chave da opção "Todos"/"Todas" das listas de filtro.
 const todos = '*';
@@ -349,6 +350,10 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
     app.aoMudarGrupos.add(_aoMudarGrupos);
     carregarServico(null);
     if (!app.semPrestador) recarregarTomadores();
+    for (final c in _camposRascunho) {
+      _camposIniciais[c] = c.text;
+      c.addListener(_atualizar);
+    }
   }
 
   void _redesenhar() => redesenhar();
@@ -389,6 +394,9 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
 
   @override
   void dispose() {
+    for (final c in _camposRascunho) {
+      c.removeListener(_atualizar);
+    }
     if (atual == this) atual = null;
     _ddTimer?.cancel();
     app.semAtualizar(_redesenhar);
@@ -600,6 +608,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
     var imut = <List<String>>[];
     try {
       final xml = ja<String>('cofre.xml_por_chave', {
+        'origem': 'substituir',
         'dono': app.prestador,
         'chave': chave,
       });
@@ -772,6 +781,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
   }
 
   void _aoTextoTomador(String texto) {
+    _atualizar();
     // Só age com lista GRANDE (janela nossa); pequenas ficam com o filtro do próprio menu.
     if (_tomTodos.length <= _maxOpcoes) return;
     _aplicarFiltro(texto);
@@ -892,6 +902,10 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
   String get _pctCsll => _retZero ? _retZeroCsll : pCsll.text;
 
   void alternarTributos() {
+    if (!app.temPermissao('emitir.tributos')) {
+      app.exigirPermissao('emitir.tributos', () => alternarTributos());
+      return;
+    }
     if (_tribTravado) {
       if ((tomador ?? '').isEmpty || (slug ?? '').isEmpty) {
         app.toast(
@@ -933,6 +947,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
         return;
       }
       ja<Object?>('cadastro.save_servico', {
+        'origem': 'emitir',
         'prestador': app.prestador,
         'tomador': tomador,
         'servico': slug,
@@ -1287,6 +1302,13 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
               _escolherProcurador();
               return;
             }
+            if (!app.temPermissao('emitir.procurador')) {
+              app.exigirPermissao('emitir.procurador', () {
+                cbProcurador = v == true;
+                _atualizar();
+              });
+              return;
+            }
             cbProcurador = v == true;
             if (cbProcurador) _procuradorSumiu = '';
             _atualizar();
@@ -1332,6 +1354,10 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
   /// Janela "Qual procurador assina?": um cartão por procurador; clicar escolhe e fecha.
   /// Fechar sem escolher deixa como estava.
   void _escolherProcurador() {
+    if (!app.temPermissao('emitir.procurador')) {
+      app.exigirPermissao('emitir.procurador', _escolherProcurador);
+      return;
+    }
     if (_emitindo) return;
     late final Dialogo d;
     final atual = cbProcurador ? (ddProcurador.valor ?? '') : '';
@@ -1463,6 +1489,70 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
     }
   }
 
+  final _camposIniciais = <TextEditingController, String>{};
+  List<TextEditingController> get _camposRascunho => [
+    xDesc,
+    vServ,
+    vDescInc,
+    vDescCond,
+    cLoc,
+    cTribMun,
+    destDoc,
+    destNome,
+    destMun,
+    destCep,
+    destLgr,
+    destNro,
+    destCpl,
+    destBairro,
+    pPis,
+    pCofins,
+    pIrrf,
+    pCsll,
+    pFed,
+    pEst,
+    pMun,
+  ];
+  bool get _temRascunho =>
+      (tomador ?? '').isNotEmpty ||
+      (ddTomador.texto ?? '').trim().isNotEmpty ||
+      (ddGrupo.valor ?? todos) != todos ||
+      gruposSel != null ||
+      (slug ?? '').isNotEmpty ||
+      subst != null ||
+      _camposRascunho.any(
+        (c) => c.text.trim() != (_camposIniciais[c] ?? '').trim(),
+      ) ||
+      ddCst.valor != cstOpcoes.first.$1 ||
+      ddRet.valor != retOpcoes.first.$1 ||
+      ddIss.valor != issOpcoes.first.$1 ||
+      ddRetIss.valor != retIssOpcoes.first.$1 ||
+      rtcCst.valor != null ||
+      rtcIndOp.valor != null ||
+      rtcClasse.valor != null;
+
+  void _cancelarEmissao() {
+    if (!app.temPermissao('emitir.rascunho')) {
+      app.exigirPermissao('emitir.rascunho', () => _cancelarEmissao());
+      return;
+    }
+    if (_emitindo || _travaUi || app.ocupado) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    subst = null;
+    gruposSel = null;
+    limparFormulario();
+    ddTomador.ciclo++; // invalida restaurações de foco pendentes
+    ddTomador.por(null);
+    ddTomador.texto = '';
+    _aplicarFiltro('');
+    ddTomador.avisar();
+    ddGrupo.por(todos);
+    ddGrupo.avisar();
+    _tribAberto = false;
+    recarregarTomadores();
+    _atualizar();
+  }
+
   void limparFormulario() {
     servico = null;
     tomador = null;
@@ -1569,6 +1659,10 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
 
   // ---- pré-visualização --------------------------------------------------------------- //
   void aoPrevisualizar() {
+    if (!app.temPermissao('emitir.previa')) {
+      app.exigirPermissao('emitir.previa', () => aoPrevisualizar());
+      return;
+    }
     if (!_pronto()) return;
     if (!_tribTravado) {
       app.toast('Salve os dados antes de pré-visualizar.', erro: true);
@@ -1701,19 +1795,23 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
     }
     // Mantém o salvamento de descrição/valor ao clicar Emitir. Os tributos estão travados
     // aqui e qualquer edição deles já exigiu "Salvar tributos".
-    try {
-      ja<Object?>('cadastro.save_servico', {
-        'prestador': app.prestador,
-        'tomador': tomador,
-        'servico': slug,
-        'form': form,
-      });
-    } catch (e) {
-      app.toast(
-        'Não foi possível salvar no cadastro do cliente: $e',
-        erro: true,
-      );
-      return _liberar();
+    bool salvarDados() {
+      try {
+        ja<Object?>('cadastro.save_servico', {
+          'origem': 'emitir',
+          'prestador': app.prestador,
+          'tomador': tomador,
+          'servico': slug,
+          'form': form,
+        });
+        return true;
+      } catch (e) {
+        app.toast(
+          'Não foi possível salvar no cadastro do cliente: $e',
+          erro: true,
+        );
+        return false;
+      }
     }
 
     final amb = ambRotulos[app.ambiente] ?? '';
@@ -1861,7 +1959,15 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
 
     // Emitir NFS-e exige nível 2. O aoCancelar é OBRIGATÓRIO: sem ele, cancelar a
     // autorização deixaria o botão Emitir morto.
-    app.exigirNivel(2, confirmar, titulo: 'Emitir NFS-e', aoCancelar: _liberar);
+    app.exigirPermissao('emitir.transmitir', () {
+      app.exigirPermissao('emitir.tributos', () {
+        if (salvarDados()) {
+          confirmar();
+        } else {
+          _liberar();
+        }
+      }, aoCancelar: _liberar);
+    }, aoCancelar: _liberar);
   }
 
   /// Devolve a tela Emitir ao estado utilizável.
@@ -2066,6 +2172,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
       enviarNfseEmail(
         app,
         prest: prest,
+        aposEmissao: true,
         tomador: tom,
         chave: chaveNova,
         ambiente: ambCod,
@@ -3235,6 +3342,12 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
             ListaSuspensa(
               estado: ddTomador,
               rotulo: 'Cliente (tomador)',
+              rotuloSemResultados: 'Adicionar cliente…',
+              aoSemResultados: () {
+                _cancelarTimer();
+                _tomAnterior = null;
+                abrirCliente(app, null);
+              },
               largura: TamanhosEmitir.campoClienteTomador.largura!,
               editavel: true,
               filtrar: true,
@@ -3317,6 +3430,13 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
               ],
               if (_emitindo) anel(tamanho: 22),
               const Expanded(child: SizedBox()),
+              if (!_tribAberto && _temRascunho)
+                Botao.contorno(
+                  'Cancelar emissão',
+                  icone: Icons.delete_outline,
+                  desabilitado: _emitindo || _travaUi || app.ocupado,
+                  aoClicar: _cancelarEmissao,
+                ),
               if (_tribAberto)
                 Botao.contorno(
                   _tribTravado ? 'Editar dados' : 'Salvar dados',

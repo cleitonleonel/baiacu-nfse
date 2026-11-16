@@ -1,7 +1,9 @@
 import 'dart:io';
-import 'dart:ui' show AppExitResponse;
+import 'dart:ui' show AppExitResponse, AppExitType;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/services.dart' show MethodChannel, ServicesBinding;
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'acesso/acesso.dart';
@@ -15,8 +17,10 @@ import 'tema.dart';
 /// Raiz dos dados: ProgramData na instalação; pasta do executável no ZIP portátil. Em
 /// desenvolvimento, a variável NFSE_RAIZ aponta para a raiz do projeto.
 String _raiz() {
-  final dev = Platform.environment['NFSE_RAIZ'] ?? '';
-  if (dev.isNotEmpty) return dev;
+  if (kDebugMode) {
+    final dev = Platform.environment['NFSE_RAIZ'] ?? '';
+    if (dev.isNotEmpty) return dev;
+  }
   final pasta = File(Platform.resolvedExecutable).parent.path;
   if (File('$pasta/installed.marker').existsSync()) {
     final dados = Platform.environment['ProgramData'];
@@ -83,7 +87,10 @@ class EmissorApp extends StatefulWidget {
 }
 
 class _EmissorAppState extends State<EmissorApp> with WidgetsBindingObserver {
+  static const _janela = MethodChannel('baiacu/janela');
+  final _navegador = GlobalKey<NavigatorState>();
   App? _app;
+  bool _avaliandoSaida = false;
 
   @override
   void reassemble() {
@@ -96,34 +103,83 @@ class _EmissorAppState extends State<EmissorApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _janela.setMethodCallHandler((chamada) async {
+      if (chamada.method == 'sairDaBandeja' &&
+          await _pedirSaida(daBandeja: true) == AppExitResponse.exit) {
+        await ServicesBinding.instance.exitApplication(AppExitType.required);
+      }
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _janela.setMethodCallHandler(null);
     super.dispose();
   }
 
-  /// O "X" da janela. Com um trabalho em segundo plano ou uma decisão de transmissão
-  /// pendente o fechamento é recusado; senão, a arrumação roda antes de o processo sair.
   @override
-  Future<AppExitResponse> didRequestAppExit() async {
+  Future<AppExitResponse> didRequestAppExit() => _pedirSaida();
+
+  bool _saidaBloqueada() {
     final app = _app;
-    if (app != null && app.viva) {
-      if (app.ocupado) {
-        app.toast(
-          'Conclua a operação ou a decisão de transmissão pendente antes de fechar.',
-          erro: true,
-        );
-        return AppExitResponse.cancel;
-      }
-      app.pararTimers(encerrarRede: false);
-    }
-    await App.arrumarParaFechar().timeout(
-      const Duration(seconds: 2),
-      onTimeout: () {},
+    if (app == null || !app.viva || !app.ocupado) return false;
+    app.toast(
+      'Conclua a operação ou a decisão de transmissão pendente antes de fechar.',
+      erro: true,
     );
-    return AppExitResponse.exit;
+    return true;
+  }
+
+  Future<AppExitResponse> _pedirSaida({bool daBandeja = false}) async {
+    if (_avaliandoSaida) return AppExitResponse.cancel;
+    _avaliandoSaida = true;
+    try {
+      if (!daBandeja && _app?.minimizarAoFechar == true) {
+        try {
+          if (await _janela.invokeMethod<bool>('ocultarNaBandeja') == true) {
+            return AppExitResponse.cancel;
+          }
+        } catch (e) {
+          debugPrint('Falha ao mover o Baiacu para a bandeja: $e');
+        }
+      }
+      final contexto = _navegador.currentContext;
+      if (contexto == null || _saidaBloqueada()) return AppExitResponse.cancel;
+      final confirmou = await showDialog<bool>(
+        context: contexto,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Sair do Baiacu NFS-e?'),
+          content: const SizedBox(
+            width: 440,
+            child: Text('Deseja realmente sair do programa?'),
+          ),
+          actions: [
+            TextButton(
+              autofocus: true,
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Sair'),
+            ),
+          ],
+        ),
+      );
+      if (confirmou != true || _saidaBloqueada()) return AppExitResponse.cancel;
+
+      final app = _app;
+      if (app != null && app.viva) app.pararTimers(encerrarRede: false);
+      await App.arrumarParaFechar().timeout(
+        const Duration(seconds: 2),
+        onTimeout: () {},
+      );
+      return AppExitResponse.exit;
+    } finally {
+      _avaliandoSaida = false;
+    }
   }
 
   void _entrou(Usuario u) {
@@ -150,6 +206,7 @@ class _EmissorAppState extends State<EmissorApp> with WidgetsBindingObserver {
     final app = _app;
     final cores = app == null ? Aparencia.padrao : aparenciaAtual;
     return MaterialApp(
+      navigatorKey: _navegador,
       title: 'Baiacu NFS-e',
       debugShowCheckedModeBanner: false,
       theme: temaApp(cores: cores),
@@ -165,7 +222,7 @@ class _EmissorAppState extends State<EmissorApp> with WidgetsBindingObserver {
       // Janela pequena: a tela inteira encolhe por igual (ver escala.dart).
       builder: (context, child) => EditorLayout(
         raiz:
-            Platform.environment['NFSE_RAIZ'] ??
+            (kDebugMode ? Platform.environment['NFSE_RAIZ'] : null) ??
             File(Platform.resolvedExecutable).parent.path,
         child: NaEscala(child: child!),
       ),

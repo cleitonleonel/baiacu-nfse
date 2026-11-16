@@ -335,6 +335,11 @@ class ConsultarState extends State<TelaConsultar>
   /// Reenvia TODAS as DPS pendentes do prestador atual (botão "Reenviar agora" ou o ciclo
   /// automático de 5 min).
   void _reenviarTodas({bool automatico = false}) {
+    if (!app.temPermissao('consultar.reenviar', somenteLogado: automatico)) {
+      if (!automatico)
+        app.exigirPermissao('consultar.reenviar', () => _reenviarTodas());
+      return;
+    }
     if (!app.viva) {
       _pendParar();
       return;
@@ -395,6 +400,10 @@ class ConsultarState extends State<TelaConsultar>
 
   /// Reenvia UMA DPS pendente (botão da linha).
   void _reenviarUm(Map<String, dynamic> p) {
+    if (!app.temPermissao('consultar.reenviar')) {
+      app.exigirPermissao('consultar.reenviar', () => _reenviarUm(p));
+      return;
+    }
     if (_pendEnviando) {
       app.toast('Já existe um reenvio em andamento — aguarde.', erro: true);
       return;
@@ -523,6 +532,7 @@ class ConsultarState extends State<TelaConsultar>
 
   /// Salva uma cópia da DPS assinada (pendente) num local escolhido pelo usuário.
   Future<void> _baixarDps(Map<String, dynamic> p) async {
+    if (!await app.autorizarAcao('consultar.xml')) return;
     final b64 = ja<String>('emissao.pendente_xml', {
       'prestador': app.prestador,
       'id': p['id'],
@@ -890,6 +900,7 @@ class ConsultarState extends State<TelaConsultar>
 
   /// Mostra a página atual.
   void carregarPagina() {
+    if (!app.temPermissao('consultar.pesquisar')) return;
     try {
       _carregar();
     } catch (e) {
@@ -954,6 +965,10 @@ class ConsultarState extends State<TelaConsultar>
 
   // ---- exportar dados: UMA janela para XMLs, DANFSe e relatórios --------------------------- //
   void _abrirExportar() {
+    if (!app.temPermissao('consultar.exportar')) {
+      app.exigirPermissao('consultar.exportar', () => _abrirExportar());
+      return;
+    }
     if (app.prestador.isEmpty) {
       app.toast('Selecione um prestador.', erro: true);
       return;
@@ -1424,6 +1439,7 @@ class ConsultarState extends State<TelaConsultar>
   // ---- ações de cada nota -------------------------------------------------------------------- //
   /// Salva uma cópia do XML oficial (lido do banco de notas) num local escolhido.
   Future<void> _baixarXml(Map<String, dynamic> rec) async {
+    if (!await app.autorizarAcao('consultar.xml')) return;
     final nome = _ou(rec['chave'], _ou(rec['nNFSe'], 'nfse'));
     String? destino;
     try {
@@ -2029,8 +2045,8 @@ class ConsultarState extends State<TelaConsultar>
                         'Cancelar envio (tira da fila)',
                         Icons.cancel_outlined,
                         Colors.red.shade700,
-                        () => app.exigirNivel(
-                          2,
+                        () => app.exigirPermissao(
+                          'consultar.cancelar_pendente',
                           () => _cancelarPendente(p),
                           titulo: 'Cancelar envio pendente nº ${s('n_dps')}',
                         ),
@@ -2150,9 +2166,15 @@ class ConsultarState extends State<TelaConsultar>
                         'Substituir NFS-e',
                         Icons.swap_horiz,
                         Colors.orange.shade800,
-                        () => app.exigirNivel(
-                          3,
-                          () => EmitirState.atual?.substituir(r),
+                        () => app.exigirPermissao(
+                          'consultar.substituir',
+                          () => app.exigirPermissao('emitir', () {
+                            // A tela de emissão pode estar desmontada até receber a autorização.
+                            app.atualizar();
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (app.viva) EmitirState.atual?.substituir(r);
+                            });
+                          }),
                           titulo: 'Substituir NFS-e nº $numero',
                         ),
                       ),
@@ -2160,8 +2182,8 @@ class ConsultarState extends State<TelaConsultar>
                         'Estornar (cancelar) NFS-e',
                         Icons.cancel_outlined,
                         Colors.red.shade700,
-                        () => app.exigirNivel(
-                          3,
+                        () => app.exigirPermissao(
+                          'consultar.estornar',
                           () => _estornar(r),
                           titulo: 'Estornar NFS-e nº $numero',
                         ),
@@ -2335,7 +2357,7 @@ class ConsultarState extends State<TelaConsultar>
             idLayout: 'TamanhosConsultar.botaoAtualizarALista',
           ),
         ], idLayout: 'Grupo.consultar.lin.11'),
-        if (_pendN > 0)
+        if (_pendN > 0 && app.temPermissao('consultar.pesquisar'))
           Ct(
             cor: Colors.orange.shade50,
             raio: BorderRadius.circular(8),
@@ -2379,82 +2401,92 @@ class ConsultarState extends State<TelaConsultar>
               ),
             ], idLayout: 'Grupo.consultar.lin.12'),
           ),
-        lin(
-          [
-            CampoTexto(
-              controle: _busca,
-              rotulo: rotuloDaBusca,
-              largura: TamanhosConsultar.campoRotuloDaBusca.largura,
-              iconePrefixo: const Icon(Icons.search),
-              aoMudar: (_) => _aoVivo.tecla(() {
-                // Só recarrega se ainda estivermos na Consulta.
-                if (app.navAtual != 2 || app.prestador.isEmpty) return;
-                _pagina = 0;
-                carregarPagina();
-              }, viva: () => app.viva && mounted),
-              altura: TamanhosConsultar.campoRotuloDaBusca.altura,
-              idLayout: 'TamanhosConsultar.campoRotuloDaBusca',
+        if (!app.temPermissao('consultar.pesquisar'))
+          Expanded(
+            child: AcessoRestrito(
+              aoAutorizar: () =>
+                  app.exigirPermissao('consultar.pesquisar', carregarPagina),
             ),
-            ListaSuspensa(
-              estado: _ddPeriodo,
-              rotulo: 'Período',
-              largura:
-                  TamanhosConsultar.campoPeriodo2.largura ?? (_larguraPeriodo),
-              aoSelecionar: _aoPeriodo,
-              altura: TamanhosConsultar.campoPeriodo2.altura,
-              idLayout: 'TamanhosConsultar.campoPeriodo2',
-            ),
-            ListaSuspensa(
-              estado: _ddAmbiente,
-              rotulo: 'Ambiente',
-              largura: TamanhosConsultar.campoAmbiente2.largura!,
-              aoSelecionar: _aoAmbiente,
-              altura: TamanhosConsultar.campoAmbiente2.altura,
-              idLayout: 'TamanhosConsultar.campoAmbiente2',
-            ),
-            ListaSuspensa(
-              estado: _ddEmpresa,
-              rotulo: 'Empresa',
-              largura: TamanhosConsultar.campoEmpresa.largura!,
-              larguraMenu: 420,
-              desabilitado: !_temClientes,
-              aoSelecionar: _aoEmpresa,
-              altura: TamanhosConsultar.campoEmpresa.altura,
-              idLayout: 'TamanhosConsultar.campoEmpresa',
-            ),
-          ],
-          quebra: true,
-          idLayout: 'Grupo.consultar.lin.13',
-        ),
-        Tx(
-          _vazio,
-          italico: true,
-          cor: Colors.grey.shade600,
-          largura: TamanhosConsultar.rotuloVazio.largura,
-          altura: TamanhosConsultar.rotuloVazio.altura,
-          idLayout: 'TamanhosConsultar.rotuloVazio',
-        ),
-        // Rolagem nas duas direções com a barra HORIZONTAL fixa no rodapé VISÍVEL.
-        Expanded(child: tabela),
-        divisor(altura: 1),
-        BarraPaginacao(
-          pagina: _pagina,
-          paginas: paginas,
-          porPagina: _porPagina,
-          controleIr: _irPara,
-          rotulo: _carregadoPrest == null ? '' : null,
-          aoIr: (p) {
-            _pagina = p;
-            carregarPagina();
-          },
-          aoPorPagina: (n) {
-            if (n == _porPagina) return;
-            _porPagina = n;
-            _pagina = 0;
-            if (app.prestador.isNotEmpty) carregarPagina();
-            _redesenhar();
-          },
-        ),
+          )
+        else ...[
+          lin(
+            [
+              CampoTexto(
+                controle: _busca,
+                rotulo: rotuloDaBusca,
+                largura: TamanhosConsultar.campoRotuloDaBusca.largura,
+                iconePrefixo: const Icon(Icons.search),
+                aoMudar: (_) => _aoVivo.tecla(() {
+                  // Só recarrega se ainda estivermos na Consulta.
+                  if (app.navAtual != 2 || app.prestador.isEmpty) return;
+                  _pagina = 0;
+                  carregarPagina();
+                }, viva: () => app.viva && mounted),
+                altura: TamanhosConsultar.campoRotuloDaBusca.altura,
+                idLayout: 'TamanhosConsultar.campoRotuloDaBusca',
+              ),
+              ListaSuspensa(
+                estado: _ddPeriodo,
+                rotulo: 'Período',
+                largura:
+                    TamanhosConsultar.campoPeriodo2.largura ??
+                    (_larguraPeriodo),
+                aoSelecionar: _aoPeriodo,
+                altura: TamanhosConsultar.campoPeriodo2.altura,
+                idLayout: 'TamanhosConsultar.campoPeriodo2',
+              ),
+              ListaSuspensa(
+                estado: _ddAmbiente,
+                rotulo: 'Ambiente',
+                largura: TamanhosConsultar.campoAmbiente2.largura!,
+                aoSelecionar: _aoAmbiente,
+                altura: TamanhosConsultar.campoAmbiente2.altura,
+                idLayout: 'TamanhosConsultar.campoAmbiente2',
+              ),
+              ListaSuspensa(
+                estado: _ddEmpresa,
+                rotulo: 'Empresa',
+                largura: TamanhosConsultar.campoEmpresa.largura!,
+                larguraMenu: 420,
+                desabilitado: !_temClientes,
+                aoSelecionar: _aoEmpresa,
+                altura: TamanhosConsultar.campoEmpresa.altura,
+                idLayout: 'TamanhosConsultar.campoEmpresa',
+              ),
+            ],
+            quebra: true,
+            idLayout: 'Grupo.consultar.lin.13',
+          ),
+          Tx(
+            _vazio,
+            italico: true,
+            cor: Colors.grey.shade600,
+            largura: TamanhosConsultar.rotuloVazio.largura,
+            altura: TamanhosConsultar.rotuloVazio.altura,
+            idLayout: 'TamanhosConsultar.rotuloVazio',
+          ),
+          // Rolagem nas duas direções com a barra HORIZONTAL fixa no rodapé VISÍVEL.
+          Expanded(child: tabela),
+          divisor(altura: 1),
+          BarraPaginacao(
+            pagina: _pagina,
+            paginas: paginas,
+            porPagina: _porPagina,
+            controleIr: _irPara,
+            rotulo: _carregadoPrest == null ? '' : null,
+            aoIr: (p) {
+              _pagina = p;
+              carregarPagina();
+            },
+            aoPorPagina: (n) {
+              if (n == _porPagina) return;
+              _porPagina = n;
+              _pagina = 0;
+              if (app.prestador.isNotEmpty) carregarPagina();
+              _redesenhar();
+            },
+          ),
+        ],
       ],
       espaco: 14,
       idLayout: 'Grupo.consultar.col.12',
@@ -2466,6 +2498,13 @@ class ConsultarState extends State<TelaConsultar>
 /// autorizado que está no banco de notas (já com a marca d'água de cancelada/substituída
 /// quando for o caso), num arquivo temporário. [rotulo] identifica a nota no Registro.
 void abrirDanfse(App app, String chave, {String rotulo = ''}) {
+  if (!app.temPermissao('consultar.pdf')) {
+    app.exigirPermissao(
+      'consultar.pdf',
+      () => abrirDanfse(app, chave, rotulo: rotulo),
+    );
+    return;
+  }
   final nome = rotulo.isEmpty
       ? 'NFS-e de chave …${chave.length > 8 ? chave.substring(chave.length - 8) : chave}'
       : rotulo;
@@ -2474,6 +2513,7 @@ void abrirDanfse(App app, String chave, {String rotulo = ''}) {
     String pdf;
     try {
       pdf = await chamar<String>('cofre.gerar_danfse', {
+        'origem': 'consultar',
         'dono': prest,
         'chave': chave,
       });

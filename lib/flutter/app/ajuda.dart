@@ -8,6 +8,7 @@ import 'app.dart';
 import 'sistema.dart';
 
 void abrirAjuda(App app) {
+  if(!app.temPermissao('ajuda')) { app.exigirPermissao('ajuda',()=>abrirAjuda(app));return; }
   Map<String, dynamic> info;
   try {
     info = jaMapa('ajuda.info');
@@ -106,7 +107,7 @@ Widget _conteudo(BuildContext context, App app, Map<String, dynamic> info) {
         filhos: [
           if (temManual) ...[
             FilledButton.icon(
-              onPressed: () => abrirCaminho(app, manual),
+              onPressed: () => app.exigirPermissao('ajuda.manual',()=>abrirCaminho(app, manual)),
               icon: const Icon(Icons.open_in_new, size: 18),
               label: const Text('Abrir o manual'),
             ),
@@ -149,12 +150,12 @@ Widget _conteudo(BuildContext context, App app, Map<String, dynamic> info) {
             runSpacing: 8,
             children: [
               FilledButton.icon(
-                onPressed: () => abrirUrl(app, 'mailto:$email?subject=$assunto'),
+                onPressed: () => app.exigirPermissao('ajuda.contato',()=>abrirUrl(app, 'mailto:$email?subject=$assunto')),
                 icon: const Icon(Icons.mail_outline, size: 18),
                 label: const Text('Escrever e-mail'),
               ),
               OutlinedButton.icon(
-                onPressed: () => copiar(app, email, aviso: 'E-mail copiado.'),
+                onPressed: () => app.exigirPermissao('ajuda.contato',()=>copiar(app,email,aviso:'E-mail copiado.')),
                 icon: const Icon(Icons.copy, size: 18),
                 label: const Text('Copiar'),
               ),

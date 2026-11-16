@@ -681,16 +681,12 @@ class _RedefinirMasterState extends State<_RedefinirMaster> {
       erro = politica;
     } else if (_senha.text != _confirma.text) {
       erro = 'As senhas não conferem.';
-    } else if (!await Nucleo.chamar<bool>('chaves.destrancar_com_mestra', {
-      'senha': _mestra.text,
-    })) {
-      _registrar('warning', 'Redefinição do master: senha mestra incorreta.');
-      erro = 'Senha mestra incorreta.';
     } else {
       try {
         final u = await Nucleo.chamar<Map<String, dynamic>>(
           'usuarios.redefinir_senha_master',
           {
+            'senha_mestra': _mestra.text,
             'nova_senha': _senha.text,
             'novo_login': _login.text,
             'novo_nome': _nome.text,

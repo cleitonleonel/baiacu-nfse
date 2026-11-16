@@ -10,7 +10,7 @@
 //!     só nasce no primeiro acesso);
 //!   - não é possível desativar/excluir o último master ativo.
 use chrono::Local;
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use unicode_normalization::UnicodeNormalization;
@@ -370,6 +370,7 @@ pub fn entrar(login: &str, senha: &str) -> Res<Option<Usuario>> {
     if u.is_none() && abriu {
         banco::trancar();
     }
+    crate::permissoes::definir_sessao(u.as_ref())?;
     Ok(u)
 }
 
@@ -438,20 +439,13 @@ pub fn prestadores_permitidos(u: &Usuario) -> Res<Vec<String>> {
     Ok(v)
 }
 
-/// Concede a um usuário o direito de operar um prestador. Exige nível 3 (Admin) ou superior.
-pub fn vincular_prestador(usuario_id: i64, prestador: &str, por: Option<&Usuario>) -> Res<()> {
-    if por.is_some_and(|p| p.nivel < 3) {
-        return Err(Erro::valor(
-            "Apenas nível 3 (Admin) ou superior pode definir os prestadores de um usuário.",
-        ));
-    }
+/// Concede a um usuário o direito de operar um prestador.
+pub fn vincular_prestador(usuario_id: i64, prestador: &str, por: &Usuario) -> Res<()> {
     let prestador = prestador.trim();
     if prestador.is_empty() {
         return Err(Erro::valor("Prestador inválido."));
     }
-    if por_id(usuario_id)?.is_master() {
-        return Err(Erro::valor("O master já opera todos os prestadores."));
-    }
+    exigir_gerencia_de_vinculo(usuario_id, por)?;
     let con = db()?;
     con.execute(
         "INSERT OR IGNORE INTO usuario_prestadores (usuario_id, prestador) VALUES (?1, ?2)",
@@ -460,19 +454,26 @@ pub fn vincular_prestador(usuario_id: i64, prestador: &str, por: Option<&Usuario
     Ok(())
 }
 
-/// Remove o direito do usuário de operar um prestador. Exige nível 3 (Admin) ou superior.
-pub fn desvincular_prestador(usuario_id: i64, prestador: &str, por: Option<&Usuario>) -> Res<()> {
-    if por.is_some_and(|p| p.nivel < 3) {
-        return Err(Erro::valor(
-            "Apenas nível 3 (Admin) ou superior pode definir os prestadores de um usuário.",
-        ));
-    }
+/// Remove o direito do usuário de operar um prestador.
+pub fn desvincular_prestador(usuario_id: i64, prestador: &str, por: &Usuario) -> Res<()> {
+    exigir_gerencia_de_vinculo(usuario_id, por)?;
     let con = db()?;
     con.execute(
         "DELETE FROM usuario_prestadores WHERE usuario_id = ?1 AND prestador = ?2",
         params![usuario_id, prestador.trim()],
     )?;
     Ok(())
+}
+
+fn exigir_gerencia_de_vinculo(usuario_id: i64, por: &Usuario) -> Res<()> {
+    let alvo = por_id(usuario_id)?;
+    if alvo.is_master() {
+        return Err(Erro::valor("O master já opera todos os prestadores."));
+    }
+    if alvo.id == por.id {
+        return Ok(());
+    }
+    exigir_gerencia(&alvo, por)
 }
 
 /// Prestador DELETADO: remove os vínculos de todos os usuários com ele. Os usuários em si
@@ -527,11 +528,6 @@ pub fn criar(
     }
     match criado_por {
         None => {
-            if tem_usuarios()? {
-                return Err(Erro::valor(
-                    "Cadastro inicial indisponível: já existem usuários.",
-                ));
-            }
             nivel = NIVEL_MASTER;
             vinculos.clear();
         }
@@ -552,7 +548,17 @@ pub fn criar(
     let novo_id = {
         let mut con = db()?;
         let sal = chaves::aleatorio(16);
-        let tx = con.transaction()?;
+        let senha_hash = hash(senha, &sal);
+        let tx = con.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if criado_por.is_none()
+            && tx.query_row("SELECT EXISTS(SELECT 1 FROM usuarios)", [], |r| {
+                r.get::<_, bool>(0)
+            })?
+        {
+            return Err(Erro::valor(
+                "Cadastro inicial indisponível: já existem usuários.",
+            ));
+        }
         let inserido = tx.execute(
             "INSERT INTO usuarios (login, nome, nivel, senha_salt, senha_hash, ativo, criado_em, criado_por) \
              VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7)",
@@ -561,7 +567,7 @@ pub fn criar(
                 nome,
                 nivel,
                 sal,
-                hash(senha, &sal),
+                senha_hash,
                 Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
                 criado_por.map(|p| p.login.as_str()).unwrap_or("bootstrap"),
             ],
@@ -590,13 +596,17 @@ pub fn criar(
     if banco::destrancado() {
         chaves::definir_senha(novo_id, &login, senha)?;
     }
-    Ok(Usuario {
+    let novo = Usuario {
         id: novo_id,
         login,
         nome,
         nivel,
         ativo: true,
-    })
+    };
+    if criado_por.is_none() {
+        crate::permissoes::definir_sessao(Some(&novo))?;
+    }
+    Ok(novo)
 }
 
 pub fn listar() -> Res<Vec<Usuario>> {

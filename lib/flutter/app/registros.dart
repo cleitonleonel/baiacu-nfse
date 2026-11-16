@@ -49,6 +49,10 @@ class BotaoRegistros extends StatelessWidget {
 /// Últimos 100 registros da SESSÃO, em TEMPO REAL (processos em andamento aparecem com o
 /// anel girando e viram ✓/erro na hora). Abrir marca tudo como lido.
 void abrirRegistros(App app) {
+  if (!app.temPermissao('registros.consultar')) {
+    app.exigirPermissao('registros.consultar', () => abrirRegistros(app));
+    return;
+  }
   app.marcarRegistrosLidos();
 
   Widget linha(Registro r) => lin(
@@ -215,6 +219,13 @@ class _ListaState extends State<_Lista> {
 /// Consulta os registros gravados em logs/nfse_AAAAMMDD.log. A lista da sessão morre ao
 /// fechar o programa; esta é a visão que sobrevive.
 void abrirHistoricoRegistros(App app) {
+  if (!app.temPermissao('registros.historico')) {
+    app.exigirPermissao(
+      'registros.historico',
+      () => abrirHistoricoRegistros(app),
+    );
+    return;
+  }
   const teto = 200; // linhas montadas de uma vez
   late final Dialogo d;
   final periodo = Suspensa(
@@ -376,8 +387,7 @@ void abrirHistoricoRegistros(App app) {
                                 altura: TamanhosRegistros
                                     .rotuloQuandoRQuandoAsString
                                     .altura,
-                                idLayout:
-                                    'TamanhosRegistros.rotuloQuandoRQuandoAsString',
+                                idLayout: 'TamanhosRegistros.rotuloQuandoRQuandoAsString',
                               ),
                               Expanded(
                                 child: Tx(

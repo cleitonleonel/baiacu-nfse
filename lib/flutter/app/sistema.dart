@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 
 import 'app.dart';
 
@@ -125,7 +126,7 @@ Future<void> abrirPdfNativo(String caminho) async {
   if (!pdf.existsSync()) {
     throw FileSystemException('PDF nao encontrado', pdf.path);
   }
-  final raiz = Platform.environment['NFSE_RAIZ'] ??
+  final raiz = (kDebugMode ? Platform.environment['NFSE_RAIZ'] : null) ??
       File(Platform.resolvedExecutable).parent.path;
   final exe = File('$raiz\\bin\\sumatrapdf\\SumatraPDF.exe').absolute;
   if (!exe.existsSync()) {

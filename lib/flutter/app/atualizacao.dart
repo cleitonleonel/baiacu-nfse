@@ -9,6 +9,7 @@ import 'sistema.dart';
 
 /// A versão nova encontrada (null = nenhuma): o botão do topo aparece enquanto houver.
 final atualizacaoDisponivel = ValueNotifier<Map<String, dynamic>?>(null);
+final _avisoExibido = Expando<String>();
 
 const _verde = Color(0xFF15803D);
 const _cursorAtualizacao = WidgetStatePropertyAll<MouseCursor>(
@@ -19,17 +20,23 @@ const _cursorAtualizacao = WidgetStatePropertyAll<MouseCursor>(
 /// opção desligada e a versão pulada, e nunca mostra erro). Manual: sempre consulta e diz o
 /// resultado.
 Future<void> procurarAtualizacao(App app, {bool automatica = false}) async {
+  if (automatica) {
+    if (!app.temPermissao('config.atualizacao.preparar', somenteLogado: true))
+      return;
+  } else if (!await app.autorizarAcao('config.atualizacao.preparar')) {
+    return;
+  }
   final h = automatica ? null : app.toastProgresso('Procurando versão nova…');
   try {
     final r = Map<String, dynamic>.from(
       await chamar<Map>('atualizacao.verificar', {'automatica': automatica}),
     );
+    if (!app.viva) return;
     if (r['disponivel'] == true) {
-      atualizacaoDisponivel.value = r;
       if (h != null) {
         app.toastFim(h, 'Versão ${r['versao']} disponível.');
-        abrirAtualizacao(app);
       }
+      mostrarAtualizacaoDisponivel(app, r, automatica: automatica);
     } else if (h != null && r['aviso'] != null) {
       app.toastFim(h, '${r['aviso']}', aviso: true);
     } else if (h != null) {
@@ -41,6 +48,35 @@ Future<void> procurarAtualizacao(App app, {bool automatica = false}) async {
   } catch (e) {
     if (h != null) app.toastFim(h, '$e', erro: true);
   }
+}
+
+void mostrarAtualizacaoDisponivel(
+  App app,
+  Map<String, dynamic> info, {
+  required bool automatica,
+}) {
+  atualizacaoDisponivel.value = info;
+  if (!automatica) {
+    abrirAtualizacao(app);
+    return;
+  }
+
+  final versao = '${info['versao']}';
+  void avisar() {
+    if (!app.viva ||
+        _avisoExibido[app] == versao ||
+        atualizacaoDisponivel.value?['versao'] != info['versao'] ||
+        !app.temPermissao('config.atualizacao', somenteLogado: true)) {
+      return;
+    }
+    if (app.ocupado || app.dialogos.isNotEmpty) {
+      app.agendar(const Duration(seconds: 2), avisar);
+      return;
+    }
+    abrirAtualizacao(app);
+  }
+
+  avisar();
 }
 
 /// O botão do topo. Só aparece com versão nova.
@@ -100,13 +136,20 @@ class BotaoAtualizacao extends StatelessWidget {
 void abrirAtualizacao(App app) {
   final info = atualizacaoDisponivel.value;
   if (info == null) return;
+  if (!app.temPermissao('config.atualizacao')) {
+    app.exigirPermissao('config.atualizacao', () => abrirAtualizacao(app));
+    return;
+  }
   final versao = '${info['versao'] ?? ''}';
+  if (app.dialogos.any((d) => d.marcador == 'atualizacao_disponivel')) return;
+  _avisoExibido[app] = versao;
   final notas = '${info['notas'] ?? ''}'.trim();
   final instalavel = info['instalavel'] == true;
   final mb = ((info['tamanho'] as num?) ?? 0) / 1048576;
   late final Dialogo d;
   d = Dialogo(
     largura: 620,
+    marcador: 'atualizacao_disponivel',
     titulo: (_) => app.tituloComX('Versão $versao disponível'),
     conteudo: (context) {
       final esquema = Theme.of(context).colorScheme;
@@ -216,6 +259,13 @@ void abrirAtualizacao(App app) {
 bool _baixando = false;
 
 void _baixarEInstalar(App app, String versao) {
+  if (!app.temPermissao('config.atualizacao.preparar')) {
+    app.exigirPermissao(
+      'config.atualizacao.preparar',
+      () => _baixarEInstalar(app, versao),
+    );
+    return;
+  }
   if (_baixando) return;
   _baixando = true;
   final h = app.toastProgresso('Baixando a versão $versao…');
@@ -317,7 +367,10 @@ void _confirmar(App app, String versao) {
             );
             return;
           }
-          if (instalando) return;
+          if (instalando ||
+              !await app.autorizarAcao('config.atualizacao.instalar'))
+            return;
+          if (instalando || !d.aberto) return;
           instalando = true;
           final progresso = app.toastProgresso('Preparando a instalação…');
           try {

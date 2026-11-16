@@ -2,7 +2,9 @@
 #define RUNNER_FLUTTER_WINDOW_H_
 
 #include <flutter/dart_project.h>
+#include <flutter/encodable_value.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
 
 #include <memory>
 
@@ -25,6 +27,11 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  bool AdicionarIcone(HWND window);
+  void RemoverIcone(HWND window);
+  void RestaurarDaBandeja(HWND window);
+  void MostrarMenuDaBandeja(HWND window);
+
   // The project to run.
   flutter::DartProject project_;
 
@@ -34,6 +41,9 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> janela_;
+  UINT mensagem_taskbar_criada_ = 0;
+  bool na_bandeja_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

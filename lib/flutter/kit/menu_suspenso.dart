@@ -106,8 +106,12 @@ class MenuSuspenso extends StatefulWidget {
     this.onSelected,
     required this.focusNode,
     required this.entries,
+    this.emptyActionLabel,
+    this.onEmptyAction,
   });
 
+  final String? emptyActionLabel;
+  final VoidCallback? onEmptyAction;
   final bool enabled;
   final double width;
   final double? menuHeight;
@@ -564,7 +568,14 @@ class _MenuSuspensoState extends State<MenuSuspenso> {
       });
     }
     final List<Widget> menu = entradas.isEmpty
-        ? const <Widget>[]
+        ? <Widget>[
+            if (widget.onEmptyAction != null && widget.controller.text.trim().isNotEmpty)
+              MenuItemButton(
+                leadingIcon: const Icon(Icons.person_add_alt),
+                onPressed: () { _controller.close(); widget.focusNode.unfocus(); widget.onEmptyAction!(); },
+                child: Text(widget.emptyActionLabel ?? 'Adicionar…'),
+              ),
+          ]
         : <Widget>[
             _ItensPreguicosos(
               key: _chaveItens,

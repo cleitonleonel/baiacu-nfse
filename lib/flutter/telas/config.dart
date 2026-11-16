@@ -57,7 +57,6 @@ const _textoSenhaMestra =
 
 const _metaPdfNativo =
     'ui.pdf_nativo'; // "0" = abrir PDF no leitor padrão do Windows
-const _nivelMaster = 4;
 
 /// (chave, rótulo) dos percentuais de tributos do prestador.
 const _tributosPrestador = [
@@ -160,6 +159,7 @@ class ConfigState extends State<TelaConfig> {
   _CartaoAmbiente? _ambiente;
   _CartaoEmail? _email;
   late _CartaoPersonalizacao _personalizacao;
+  late _CartaoGeral _geral;
   late _CartaoPdf _pdf;
   late _CartaoBanco _banco;
   late _CartaoProtecao _protecao;
@@ -216,6 +216,7 @@ class ConfigState extends State<TelaConfig> {
     _certificados = tem ? _cartoesDeCertificado() : const [];
     _ambiente = tem ? _CartaoAmbiente(this) : null;
     _personalizacao = _CartaoPersonalizacao(this);
+    _geral = _CartaoGeral(this);
     _atualizacao = _CartaoAtualizacao(this);
     _apoio = _CartaoApoio(this);
     _cartoes = [
@@ -230,6 +231,7 @@ class ConfigState extends State<TelaConfig> {
       ..._certificados,
       ?_ambiente,
       _personalizacao,
+      _geral,
       _atualizacao,
       _apoio,
     ];
@@ -575,11 +577,10 @@ class ConfigState extends State<TelaConfig> {
           idLayout: 'TamanhosConfiguracoes.rotuloConfiguracoes',
         ),
         Expanded(
-          // Sem prestador só valem Personalização e Avançado — e a tela abre em Avançado ›
-          // Backup, que é onde se restaura um backup numa instalação nova.
+          // Sem prestador, a tela abre em Avançado › Backup para permitir a restauração.
           child: Abas(
             key: ValueKey('config-$_geracao'),
-            inicial: tem ? 0 : 4,
+            inicial: tem ? 0 : 5,
             desabilitadas: tem ? const {} : const {0, 1, 2},
             aoMudar: aoMudar,
             rotulos: const [
@@ -587,6 +588,7 @@ class ConfigState extends State<TelaConfig> {
               ('Certificado', Icons.verified_user),
               ('Ambiente', Icons.tune),
               ('Personalização', Icons.palette_outlined),
+              ('Geral', Icons.settings_outlined),
               ('Avançado', Icons.settings_suggest_outlined),
               ('Apoie este projeto', Icons.favorite_border),
             ],
@@ -595,6 +597,7 @@ class ConfigState extends State<TelaConfig> {
               tem ? painel(_certificados) : const Ct(),
               tem ? painel([_ambiente!]) : const Ct(),
               painel([_personalizacao]),
+              painel([_geral]),
               avancado,
               painel([_apoio]),
             ],
@@ -643,6 +646,42 @@ class _Quadro extends StatelessWidget {
   );
 }
 
+class _CartaoGeral extends _Cartao {
+  _CartaoGeral(super.pai);
+
+  void _mudou(bool? valor) {
+    app.exigirPermissao('config.geral', () {
+      final ativado = valor == true;
+      try {
+        ja<Object?>('banco.set_meta', {
+          'chave': metaMinimizarAoFechar,
+          'valor': ativado ? '1' : '0',
+        });
+        app.minimizarAoFechar = ativado;
+        redesenhar();
+      } catch (e) {
+        app.toast('Não foi possível gravar a preferência: $e', erro: true);
+      }
+    });
+  }
+
+  @override
+  Widget construir(BuildContext context) => _moldura([
+    _tituloCartao('Fechamento do programa'),
+    Marcar(
+      idLayout: 'Checkbox.config.minimizarAoFechar',
+      rente: true,
+      valor: app.minimizarAoFechar,
+      rotulo: 'Mover para a bandeja do sistema ao clicar no X',
+      aoMudar: _mudou,
+    ),
+    _nota(
+      'Clique no ícone do Baiacu na bandeja para restaurar a janela. '
+      'Para encerrar, clique com o botão direito no ícone e escolha Sair.',
+    ),
+  ]);
+}
+
 /// Um valor editável do cartão: como ler e como pôr de volta.
 class _Valor {
   const _Valor(this.ler, this.por);
@@ -666,7 +705,7 @@ _Valor _lista(Suspensa s) => _Valor(() => s.valor, (v) {
 class _Edicao {
   _Edicao(
     this.dono, {
-    required this.nivel,
+    required this.permissao,
     required this.titulo,
     required this.salvar,
     required this.valores,
@@ -678,7 +717,7 @@ class _Edicao {
   }
 
   final _Cartao dono;
-  final int nivel;
+  final String permissao;
   final String titulo;
   final bool Function() salvar;
   final String rotuloSalvar;
@@ -725,7 +764,8 @@ class _Edicao {
       Botao.contorno(
         rotuloEditar,
         icone: Icons.edit,
-        aoClicar: () => dono.app.exigirNivel(nivel, _destravar, titulo: titulo),
+        aoClicar: () =>
+            dono.app.exigirPermissao(permissao, _destravar, titulo: titulo),
         largura: TamanhosConfiguracoes.botaoEditar.largura,
         altura: TamanhosConfiguracoes.botaoEditar.altura,
         idLayout: 'TamanhosConfiguracoes.botaoEditar',
@@ -775,7 +815,7 @@ class _CartaoPrestador extends _Cartao {
     _regEsp.text = s('regEspTrib');
     _edicao = _Edicao(
       this,
-      nivel: 3,
+      permissao: 'config.prestador',
       titulo: 'Editar prestador',
       salvar: _salvar,
       rotuloSalvar: 'Salvar dados do prestador',
@@ -1054,8 +1094,8 @@ class _CartaoPrestador extends _Cartao {
           dica:
               'Remove TODOS os dados deste prestador (clientes, grupos, certificado, '
               'numeração e NFS-e emitidas). Irreversível.',
-          aoClicar: () => app.exigirNivel(
-            4,
+          aoClicar: () => app.exigirPermissao(
+            'config.prestador.excluir',
             pai.confirmarDeletarPrestador,
             titulo: 'Deletar prestador',
           ),
@@ -1089,7 +1129,7 @@ class _CartaoTributos extends _Cartao {
     }
     _edicao = _Edicao(
       this,
-      nivel: 3,
+      permissao: 'config.tributos',
       titulo: 'Editar tributos do prestador',
       salvar: _salvar,
       rotuloSalvar: 'Salvar tributos',
@@ -1254,7 +1294,7 @@ class _CartaoCertificado extends _Cartao {
     _certNome = (_info['cert_name'] as String?) ?? '';
     _edicao = _Edicao(
       this,
-      nivel: 2,
+      permissao: 'config.certificados',
       titulo: tipo == _TipoCert.novoProcurador
           ? 'Adicionar procurador'
           : 'Atualizar certificado',
@@ -1368,7 +1408,7 @@ class _CartaoCertificado extends _Cartao {
   }
 
   void _excluir() =>
-      app.exigirNivel(2, _confirmarExclusao, titulo: 'Excluir certificado');
+      app.exigirPermissao('config.certificados.excluir', _confirmarExclusao);
 
   void _confirmarExclusao() {
     late final Dialogo d;
@@ -1742,7 +1782,7 @@ class _CartaoEmail extends _Cartao {
     _teste.text = ou(s('remetente'), s('usuario'));
     _edicao = _Edicao(
       this,
-      nivel: 3,
+      permissao: 'config.email',
       titulo: 'Editar e-mail',
       salvar: _salvar,
       valores: [
@@ -1879,6 +1919,10 @@ class _CartaoEmail extends _Cartao {
   }
 
   void _testar() {
+    if (!app.temPermissao('config.email.teste')) {
+      app.exigirPermissao('config.email.teste', _testar);
+      return;
+    }
     final settings = _daTela();
     final senha = _senhaDigitada;
     var destino = _teste.text.trim();
@@ -2302,11 +2346,7 @@ class _CartaoAmbiente extends _Cartao {
             'Editar',
             icone: Icons.edit,
             desabilitado: app.prestador.isEmpty,
-            aoClicar: () => app.exigirNivel(
-              3,
-              _destravar,
-              titulo: 'Editar ambiente / numeração',
-            ),
+            aoClicar: () => app.exigirPermissao('config.ambiente', _destravar),
             largura: TamanhosConfiguracoes.botaoEditar2.largura,
             altura: TamanhosConfiguracoes.botaoEditar2.altura,
             idLayout: 'TamanhosConfiguracoes.botaoEditar2',
@@ -2354,7 +2394,7 @@ class _CartaoSincronizacao extends _Cartao {
     )..por('${cfg['intervalo']}');
     _edicao = _Edicao(
       this,
-      nivel: 3,
+      permissao: 'config.sincronizacao',
       titulo: 'Sincronização do Cofre',
       salvar: _salvar,
       valores: [
@@ -2538,6 +2578,10 @@ class _CartaoProtecao extends _Cartao {
   }
 
   void _conferir() {
+    if (!app.temPermissao('config.protecao')) {
+      app.exigirPermissao('config.protecao', _conferir);
+      return;
+    }
     _ocupado = true;
     redesenhar();
     final h = app.toastProgresso('Conferindo o banco de notas…');
@@ -2594,8 +2638,7 @@ class _CartaoProtecao extends _Cartao {
         'Conferir e copiar agora',
         icone: Icons.verified_outlined,
         desabilitado: _ocupado,
-        aoClicar: () =>
-            app.exigirNivel(2, _conferir, titulo: 'Conferir o banco de notas'),
+        aoClicar: () => app.exigirPermissao('config.protecao', _conferir),
         largura: TamanhosConfiguracoes.botaoConferirECopiarAgora.largura,
         altura: TamanhosConfiguracoes.botaoConferirECopiarAgora.altura,
         idLayout: 'TamanhosConfiguracoes.botaoConferirECopiarAgora',
@@ -2613,6 +2656,10 @@ class _CartaoPdf extends _Cartao {
   bool _marcado;
 
   void _mudou(bool? v) {
+    if (!app.temPermissao('config.pdf')) {
+      app.exigirPermissao('config.pdf', () => _mudou(v));
+      return;
+    }
     final marcado = v ?? false;
     _marcado = marcado;
     try {
@@ -2945,6 +2992,7 @@ class _CartaoPersonalizacao extends _Cartao {
       return true;
     }
   }
+
   late final double sMax, vMin;
   late final List<(String, String, String)> _temas;
   late final _Seletor _fundo, _cartoesSel;
@@ -3156,10 +3204,9 @@ class _CartaoPersonalizacao extends _Cartao {
                     Botao.contorno(
                       'Editar',
                       icone: Icons.edit,
-                      aoClicar: () => app.exigirNivel(
-                        3,
+                      aoClicar: () => app.exigirPermissao(
+                        'config.personalizacao',
                         _destravar,
-                        titulo: 'Personalizar cores',
                       ),
                       largura: TamanhosConfiguracoes.botaoEditar3.largura,
                       altura: TamanhosConfiguracoes.botaoEditar3.altura,
@@ -3841,7 +3888,8 @@ class _CartaoBanco extends _Cartao {
           'Fazer backup…',
           icone: Icons.save_alt,
           desabilitado: app.backupEmAndamento,
-          aoClicar: _abrirBackup,
+          aoClicar: () =>
+              app.exigirPermissao('config.backup.exportar', _abrirBackup),
           largura: TamanhosConfiguracoes.botaoFazerBackup.largura,
           altura: TamanhosConfiguracoes.botaoFazerBackup.altura,
           idLayout: 'TamanhosConfiguracoes.botaoFazerBackup',
@@ -3850,10 +3898,9 @@ class _CartaoBanco extends _Cartao {
         Botao.contorno(
           'Restaurar backup…',
           icone: Icons.settings_backup_restore,
-          aoClicar: () => app.exigirNivel(
-            3,
+          aoClicar: () => app.exigirPermissao(
+            'config.backup.restaurar',
             () => unawaited(_escolherRestauracao()),
-            titulo: 'Restaurar backup',
           ),
           largura: TamanhosConfiguracoes.botaoRestaurarBackup.largura,
           altura: TamanhosConfiguracoes.botaoRestaurarBackup.altura,
@@ -3877,8 +3924,8 @@ class _CartaoSenhaMestra extends _Cartao {
     Botao.contorno(
       'Nova senha mestra…',
       icone: Icons.key,
-      aoClicar: () => app.exigirNivel(
-        _nivelMaster,
+      aoClicar: () => app.exigirPermissao(
+        'config.senha_mestra',
         () => pai._banco._novaSenhaMestra(),
         titulo: 'Nova senha mestra',
         semprePedirSenha: true,
@@ -3909,6 +3956,10 @@ class _CartaoAtualizacao extends _Cartao {
   }
 
   void _automatica(bool v) {
+    if (!app.temPermissao('config.atualizacao')) {
+      app.exigirPermissao('config.atualizacao', () => _automatica(v));
+      return;
+    }
     try {
       _e = jaMapa('atualizacao.configurar', {'automatica': v});
     } catch (e) {

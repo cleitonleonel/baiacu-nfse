@@ -1450,8 +1450,12 @@ class ListaSuspensa extends StatefulWidget {
     this.aoDesfocar,
     this.dicaCampo,
     this.padding,
+    this.rotuloSemResultados,
+    this.aoSemResultados,
   });
 
+  final String? rotuloSemResultados;
+  final VoidCallback? aoSemResultados;
   final Suspensa estado;
   final String? rotulo;
   final double largura;
@@ -1628,6 +1632,13 @@ class _ListaSuspensaState extends State<ListaSuspensa> {
       _valor = valor;
     }
 
+    // O texto também pode ser limpo sem mudar a seleção (ela já era nula
+    // quando o usuário digitou algo que não existe na lista).
+    final textoExterno = e.texto;
+    if (textoExterno != null && _texto.text != textoExterno) {
+      _porTexto(textoExterno);
+    }
+
     TextStyle? estiloTexto;
     if (widget.tamanhoTexto != null) {
       estiloTexto = (tema.dropdownMenuTheme.textStyle ?? const TextStyle())
@@ -1640,6 +1651,8 @@ class _ListaSuspensaState extends State<ListaSuspensa> {
     e.foco.canRequestFocus = widget.editavel;
 
     final menu = MenuSuspenso(
+      emptyActionLabel: widget.rotuloSemResultados,
+      onEmptyAction: widget.aoSemResultados,
       key: ValueKey<int>(_chaveDosItens),
       enabled: !inerte,
       focusNode: e.foco,

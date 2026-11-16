@@ -59,7 +59,25 @@ void enviarNfseEmail(
   String ambiente = '',
   String rotulo = '',
   String prest = '',
+  bool aposEmissao = false,
 }) {
+  final permissao = aposEmissao ? 'emitir.email' : 'consultar.email';
+  if (!app.temPermissao(permissao, somenteLogado: aposEmissao)) {
+    if (!aposEmissao) {
+      app.exigirPermissao(
+        permissao,
+        () => enviarNfseEmail(
+          app,
+          tomador: tomador,
+          chave: chave,
+          ambiente: ambiente,
+          rotulo: rotulo,
+          prest: prest,
+        ),
+      );
+    }
+    return;
+  }
   final prestador = prest.isEmpty ? app.prestador : prest;
   if (tomador.isEmpty || chave.isEmpty) {
     app.toast('NFS-e sem tomador ou chave para enviar por e-mail.', erro: true);
@@ -74,6 +92,7 @@ void enviarNfseEmail(
     try {
       final r = Map<String, dynamic>.from(
         await chamar<Map>('correio.enviar_nfse', {
+          if (aposEmissao) 'origem': 'emitir',
           'prestador': prestador,
           'tomador': tomador,
           'chave': chave,

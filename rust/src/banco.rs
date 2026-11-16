@@ -672,6 +672,7 @@ pub fn restaurar_de(origem: &Path, senha_mestra: &str) -> Res<()> {
     };
     validar_banco(origem, senha_mestra)?;
     let chave_notas = get_meta(META_CHAVE_NOTAS)?;
+    let permissoes = get_meta(crate::permissoes::META)?;
     let copia = PathBuf::from(format!("{}.origem", db.display()));
     let novo = PathBuf::from(format!("{}.novo", db.display()));
     let resultado = (|| -> Res<()> {
@@ -686,6 +687,14 @@ pub fn restaurar_de(origem: &Path, senha_mestra: &str) -> Res<()> {
             criar_tabelas(&con)?;
             crate::usuarios::levar_master_para(&mut con)?;
             crate::chaves::reembrulhar(&mut con, &chave)?;
+            if permissoes.is_empty() {
+                con.execute("DELETE FROM meta WHERE chave = ?1", [crate::permissoes::META])?;
+            } else {
+                con.execute(
+                    "INSERT OR REPLACE INTO meta (chave, valor) VALUES (?1, ?2)",
+                    params![crate::permissoes::META, permissoes],
+                )?;
+            }
             if chave_notas.is_empty() {
                 con.execute("DELETE FROM meta WHERE chave = ?1", [META_CHAVE_NOTAS])?;
             } else {

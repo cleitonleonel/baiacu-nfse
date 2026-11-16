@@ -14,6 +14,10 @@ const grupoMax = 20; // comprimento máximo do nome de um grupo
 /// (direita). Fora do modo de edição tudo fica apagado — só o "Editar" (senha nível 2)
 /// destrava; ele some depois de liberar.
 void abrirGrupos(App app) {
+  if (!app.temPermissao('clientes.grupos')) {
+    app.exigirPermissao('clientes.grupos', () => abrirGrupos(app));
+    return;
+  }
   if (app.prestador.isEmpty) {
     app.toast('Selecione um prestador.', erro: true);
     return;
@@ -137,10 +141,10 @@ void abrirGrupos(App app) {
         Botao.contorno(
           'Editar',
           icone: Icons.edit,
-          aoClicar: () => app.exigirNivel(2, () {
+          aoClicar: () => app.exigirPermissao('clientes.grupos', () {
             editavel = true;
             refazer();
-          }, titulo: 'Editar grupos'),
+          }),
           largura: TamanhosGrupos.botaoEditar.largura,
           altura: TamanhosGrupos.botaoEditar.altura,
           idLayout: 'TamanhosGrupos.botaoEditar',

@@ -1,6 +1,6 @@
 //! Atualização autenticada por manifesto Ed25519 e SHA-256.
-//! Downloads em TEMP por usuário. Instalação compartilhada pelo serviço sob demanda;
-//! ZIP portátil pelo helper sem elevação. Nenhuma URL/comando do cliente é executado pelo serviço.
+//! Instalação compartilhada: preparação e instalação protegidas pelo serviço sob demanda.
+//! ZIP portátil: TEMP por usuário e helper sem elevação. Nenhuma URL/comando do cliente é executado pelo serviço.
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use crate::erro::{Erro, Res};
 use crate::rede::{Sessao, Tempo};
 
 /// Versão deste programa. `compilar_exe.py` confere que é a mesma do `pubspec.yaml`.
-pub const VERSAO: &str = "1.0.0.1";
+pub const VERSAO: &str = "1.0.0.2";
 /// Repositório onde saem as versões novas (dono/nome).
 pub const REPOSITORIO: &str = "williamlala/baiacu-nfse";
 /// Nome do executável do programa empacotado.
@@ -371,6 +371,11 @@ pub fn baixar(versao_exibida: Option<&str>, avisar: Avisar) -> Res<Value> {
             "Você já está na versão mais recente ({VERSAO})."
         )));
     }
+    #[cfg(windows)]
+    if caminhos::instalado_compartilhado() {
+        baiacu_atualizador::client::prepare(&caminhos::programa(), &r.versao, std::process::id(), |v| avisar(v)).map_err(|e| erro(e.to_string()))?;
+        return Ok(json!({"versao":r.versao,"protegido":true}));
+    }
     let pasta = pasta_trabalho();
     let _ = fs::remove_dir_all(&pasta);
     fs::create_dir_all(&pasta)?;
@@ -440,6 +445,18 @@ pub fn baixar(versao_exibida: Option<&str>, avisar: Avisar) -> Res<Value> {
 pub fn instalar(versao_confirmada: Option<&str>) -> Res<Value> {
     let programa =
         instalado().ok_or_else(|| erro("Atualização disponível apenas no pacote Windows."))?;
+    #[cfg(windows)]
+    if caminhos::instalado_compartilhado() {
+        use std::os::windows::process::CommandExt;
+        let version = versao_confirmada.ok_or_else(|| erro("Confirme a versão preparada."))?;
+        if !mais_nova(version, VERSAO) { return Err(erro("Versão antiga recusada.")); }
+        let helper = programa.join("service/baiacu-atualizador.exe");
+        baiacu_atualizador::client::check_startup_support(&helper).map_err(|e| erro(e.to_string()))?;
+        baiacu_atualizador::client::ensure(&helper).map_err(|e| erro(e.to_string()))?;
+        baiacu_atualizador::client::start(version, std::process::id(), "install").map_err(|e| erro(e.to_string()))?;
+        std::process::Command::new(helper).arg("--watch").current_dir(&programa).creation_flags(0x08000000 | 0x00000008).spawn()?;
+        return Ok(json!({"versao":version}));
+    }
     let trabalho = pasta_trabalho();
     let versao = fs::read_to_string(trabalho.join("versao.txt"))?;
     if versao_confirmada.is_some_and(|confirmada| confirmada != versao.trim()) {
@@ -447,7 +464,7 @@ pub fn instalar(versao_confirmada: Option<&str>) -> Res<Value> {
             "O pacote preparado mudou. Baixe novamente a versão que deseja instalar.",
         ));
     }
-    let manifesto = baiacu_atualizador::verify(
+    let _manifesto = baiacu_atualizador::verify(
         &fs::read(trabalho.join("release.sig.json"))?,
         baiacu_atualizador::PUBLIC_KEY,
         versao.trim(),
@@ -465,7 +482,7 @@ pub fn instalar(versao_confirmada: Option<&str>) -> Res<Value> {
         cmd.creation_flags(0x08000000 | 0x00000008);
         if caminhos::instalado_compartilhado() {
             baiacu_atualizador::client::ensure(&helper).map_err(|e| erro(e.to_string()))?;
-            baiacu_atualizador::client::start(versao.trim(), std::process::id(), &manifesto.sha256)
+            baiacu_atualizador::client::start(versao.trim(), std::process::id(), "install")
                 .map_err(|e| erro(e.to_string()))?;
             cmd.arg("--watch").current_dir(&programa).spawn()?;
         } else {
@@ -500,7 +517,7 @@ pub fn instalar(versao_confirmada: Option<&str>) -> Res<Value> {
     }
     #[cfg(not(windows))]
     {
-        let _ = (programa, manifesto);
+        let _ = (programa, _manifesto);
         Err(erro("Atualização disponível somente no Windows."))
     }
 }

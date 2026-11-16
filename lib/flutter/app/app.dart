@@ -15,6 +15,7 @@ import '../kit/campo.dart';
 import '../kit/flet.dart';
 import '../nucleo.dart';
 import '../tema.dart';
+import '../permissoes.dart';
 import 'dialogo.dart';
 
 export '../acesso/acesso.dart' show Usuario;
@@ -96,6 +97,7 @@ class Registro {
     : ts = DateTime.now();
   String msg;
   bool erro;
+
   /// Informação que pede atenção (amarelo), não é erro.
   bool aviso = false;
   bool progresso;
@@ -106,11 +108,27 @@ class Registro {
 /// Cor das informações que pedem atenção mas não são erro (a mesma dos avisos em amarelo
 /// das telas): o erro é vermelho e o aviso comum, cinza-escuro.
 final corAviso = Colors.orange.shade800;
+const metaMinimizarAoFechar = 'ui.minimizar_ao_fechar';
+
+class AcessoRestrito extends StatelessWidget {
+  const AcessoRestrito({super.key, required this.aoAutorizar});
+  final VoidCallback aoAutorizar;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: OutlinedButton.icon(
+      onPressed: aoAutorizar,
+      icon: const Icon(Icons.lock_outline),
+      label: const Text('Autorizar acesso'),
+    ),
+  );
+}
 
 class Aviso {
   Aviso(this.msg, {this.erro = false, this.progresso = false});
   String msg;
   bool erro;
+
   /// Informação que pede atenção (amarelo), não é erro.
   bool aviso = false;
   bool progresso;
@@ -152,8 +170,8 @@ class App {
   String ambiente = ambProducao;
   bool semPrestador = false;
   bool pdfNativo = true;
+  bool minimizarAoFechar = false;
   int navAtual = 0;
-  Usuario? autorizador;
   bool encerrada = false;
 
   /// Trabalhos em segundo plano em curso (emissão, e-mail, sincronização, exportação…).
@@ -317,8 +335,8 @@ class App {
   final List<Timer> _timers = [];
 
   void _iniciar() {
+    Permissoes.carregar(jaMapa('permissoes.carregar'));
     HardwareKeyboard.instance.addHandler(_tecla);
-    autorizador = usuario;
     final cores = jaMapa('aparencia.carregar');
     aparenciaAtual = Aparencia(
       cores['fundo'] as String,
@@ -329,6 +347,12 @@ class App {
           ja<String>('banco.get_meta', {'chave': 'ui.pdf_nativo'}) != '0';
     } catch (_) {
       pdfNativo = true;
+    }
+    try {
+      minimizarAoFechar =
+          ja<String>('banco.get_meta', {'chave': metaMinimizarAoFechar}) == '1';
+    } catch (_) {
+      minimizarAoFechar = false;
     }
     ja<Object?>('registro.definir_usuario', {'operador_id': usuario.id});
 
@@ -408,39 +432,68 @@ class App {
   int get nivel => usuario.nivel;
   bool get master => usuario.master;
   bool pode(int n) => nivel >= n;
+  bool temPermissao(String chave, {bool somenteLogado = false}) {
+    if (pode(Permissoes.efetivo(chave))) return true;
+    return !somenteLogado && ja<bool>('permissoes.pode', {'chave': chave});
+  }
+
+  Usuario? autorizadorDaAcao(String chave) {
+    final dados = ja<Map?>('permissoes.autorizador', {'chave': chave});
+    return dados == null
+        ? null
+        : Usuario.deJson(Map<String, dynamic>.from(dados));
+  }
+
+  Future<bool> autorizarAcao(String chave) {
+    final resultado = Completer<bool>();
+    exigirPermissao(
+      chave,
+      () => resultado.complete(true),
+      aoCancelar: () => resultado.complete(false),
+    );
+    return resultado.future;
+  }
 
   /// Em vez de BLOQUEAR uma ação restrita, pede a SENHA de um usuário com nível suficiente.
   /// Se o operador logado já tem o nível, libera direto.
-  void exigirNivel(
-    int n,
+  void exigirPermissao(
+    String chave,
     VoidCallback aoOk, {
-    String titulo = 'Autorização',
+    String? titulo,
     VoidCallback? aoCancelar,
     bool semprePedirSenha = false,
   }) {
-    if (pode(n) && !semprePedirSenha) {
-      autorizador = usuario;
-      ja<Object?>('registro.definir_usuario', {'operador_id': usuario.id});
+    titulo ??= Permissoes.regras.firstWhere((r) => r.id == chave).titulo;
+    final n = Permissoes.efetivo(chave);
+    if (temPermissao(chave) && !semprePedirSenha) {
       aoOk();
       return;
     }
     late final Dialogo d;
     var erro = '';
     var processando = false;
+    var concedida = false;
     late final TextEditingController senha;
     late final FocusNode focoSenha;
 
     void ok() {
       if (processando) return;
       processando = true;
-      final r = jaMapa('usuarios.autenticar_por_senha', {
-        'senha': senha.text,
-        'nivel_minimo': n,
-      });
+      Map<String, dynamic> r;
+      try {
+        r = jaMapa('usuarios.autenticar_por_senha', {
+          'senha': senha.text,
+          'permissao': chave,
+        });
+      } catch (e) {
+        processando = false;
+        erro = '$e';
+        d.atualizar();
+        return;
+      }
       final dado = r['usuario'];
       if (dado != null) {
         final u = Usuario.deJson(Map<String, dynamic>.from(dado as Map));
-        autorizador = u;
         if (r['ambiguo'] == true) {
           ja<Object?>('registro.definir_usuario', {'operador_id': usuario.id});
           registrar(
@@ -458,9 +511,9 @@ class App {
             '(exigido $n) — $titulo',
           );
         }
-        // Como sempre foi: fechar a janela dispara o gancho de fechamento (o aoCancelar)
-        // antes de a ação liberada rodar.
-        fecharDialogo();
+        concedida = true;
+        fecharEsta(d);
+        agendar(const Duration(minutes: 5), atualizar);
         aoOk();
       } else {
         processando = false;
@@ -473,8 +526,7 @@ class App {
 
     void cancelar() {
       registrar('Autorização de nível $n cancelada ($titulo)');
-      fecharDialogo();
-      aoCancelar?.call();
+      fecharEsta(d);
     }
 
     d = Dialogo(
@@ -538,7 +590,9 @@ class App {
       ],
       // Esc/"X" fecham sem passar por `cancelar`: quem depende do aoCancelar para
       // destravar estado (a trava do botão Emitir) não pode ficar preso.
-      aoFechar: aoCancelar,
+      aoFechar: () {
+        if (!concedida) aoCancelar?.call();
+      },
       idLayout: 'Janela.app.Dialogo.1',
     );
     senha = d.texto();
@@ -854,6 +908,7 @@ class App {
     unawaited(chamar<Object?>('correio.encerrar_smtp', {'aguardar': false}));
     Timer(const Duration(milliseconds: 50), () {
       encerrar();
+      ja<Object?>('banco.trancar');
       aoSair();
     });
   }
@@ -949,9 +1004,21 @@ class App {
   /// 4 Cofre. No trilho a ordem é outra — o Cofre entra no grupo de cima e Configurações é
   /// o botão de baixo, fora dos destinos.
   static const trilhoNav = [0, 1, 2, 4];
+  static const modulosNavegacao = [
+    'emitir',
+    'clientes',
+    'consultar',
+    'config',
+    'cofre',
+  ];
   static const navTrilho = {0: 0, 1: 1, 2: 2, 4: 3};
 
   void irPara(int indice) {
+    final chave = modulosNavegacao[indice];
+    if (!temPermissao(chave)) {
+      exigirPermissao(chave, () => irPara(indice));
+      return;
+    }
     final anterior = navAtual;
     if (anterior == 3 && indice != 3) retravarConfig?.call();
     navAtual = indice;
@@ -1002,8 +1069,7 @@ class App {
               altura: TamanhosDialogos
                   .rotuloAsTelasEmissaoClientesConsultasPassamAMostrar
                   .altura,
-              idLayout:
-                  'TamanhosDialogos.rotuloAsTelasEmissaoClientesConsultasPassamAMostrar',
+              idLayout: 'TamanhosDialogos.rotuloAsTelasEmissaoClientesConsultasPassamAMostrar',
             ),
           ],
           justa: true,

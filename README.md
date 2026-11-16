@@ -200,6 +200,3 @@ O Baiacu NFS-e é feito com carinho e distribuído de graça, sem anúncios e se
 > ⚠️ Envie cada moeda **somente pela rede indicada**. Uma rede diferente pode fazer a doação se perder.
 
 <sub>© 2026 williamlala. Código-fonte disponível sob a [licença do Baiacu NFS-e](LICENSE.md). O programa inclui o leitor SumatraPDF (GPLv3), OpenSSL (Apache-2.0) e libxml2 (MIT). O leiaute da DANFSe é baseado no BrazilFiscalReport (LGPL-3.0).</sub>
-
-
-O ZIP é portátil: extraia numa pasta em que você possa gravar. Os bancos ficam em `database/` junto do executável, sem instalar serviço. Os downloads de atualização ficam no TEMP do usuário. Não copie o marcador `installed.marker` de uma instalação para o ZIP. Para migrar uma instalação antiga em Program Files, execute uma vez o novo instalador; apenas sobrepor o ZIP não migra os bancos nem corrige as permissões.

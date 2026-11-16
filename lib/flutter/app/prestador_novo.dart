@@ -83,6 +83,10 @@ String mascaraDocumento(String valor, String? tipo) => ja<String>(
 const tiposDocumento = [Opcao('CNPJ', 'CNPJ'), Opcao('CPF', 'CPF')];
 
 void abrirNovoPrestador(App app) {
+  if (!app.temPermissao('prestadores')) {
+    app.exigirPermissao('prestadores', () => abrirNovoPrestador(app));
+    return;
+  }
   late final Dialogo d;
   late final Suspensa tipo;
   late final TextEditingController doc, nome, senhaCert;
@@ -100,6 +104,10 @@ void abrirNovoPrestador(App app) {
             'o sistema confere o documento do certificado.';
 
   void buscar() {
+    if (!app.temPermissao('prestadores.consulta')) {
+      app.exigirPermissao('prestadores.consulta', buscar);
+      return;
+    }
     final numero = soDoc(doc.text);
     if (numero.length != 14) {
       app.toast('Informe um CNPJ (14 caracteres) para buscar.', erro: true);
@@ -109,7 +117,10 @@ void abrirNovoPrestador(App app) {
     app.emSegundoPlano(() async {
       Map dados;
       try {
-        dados = await chamar<Map>('consulta.cnpj', {'cnpj': numero});
+        dados = await chamar<Map>('consulta.cnpj', {
+          'cnpj': numero,
+          'origem': 'prestadores',
+        });
       } catch (e) {
         app.toast('Falha ao consultar CNPJ: $e', erro: true);
         return;
@@ -124,6 +135,7 @@ void abrirNovoPrestador(App app) {
   }
 
   Future<void> escolherCert() async {
+    if (!await app.autorizarAcao('prestadores.adicionar')) return;
     String? caminho;
     try {
       caminho = await escolherArquivo(
@@ -141,6 +153,7 @@ void abrirNovoPrestador(App app) {
   }
 
   Future<void> salvar() async {
+    if (!await app.autorizarAcao('prestadores.adicionar')) return;
     if (caminhoCert.isEmpty) {
       app.toast('Selecione o certificado (.pfx) do prestador.', erro: true);
       return;

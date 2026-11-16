@@ -44,6 +44,7 @@ class ClientesState extends State<TelaClientes>
   Map<String, (String, String)> _contatos = {};
   Map<String, (String, String)> _ultimas = {};
   void _carregarUltimas() {
+    if (!app.temPermissao('clientes.consultar')) return;
     _ultimas = {
       for (final item in ja<List>('cadastro.ultimas_nfse_clientes', {
         'prestador': app.prestador,
@@ -216,6 +217,7 @@ class ClientesState extends State<TelaClientes>
   }
 
   void recarregar() {
+    if (!app.temPermissao('clientes.consultar')) return;
     _refazerGrupos();
     if (_cache == null) _carregarCache();
     _visiveis = _calcularVisiveis();
@@ -282,11 +284,7 @@ class ClientesState extends State<TelaClientes>
                   BotaoIcone(
                     Icons.edit,
                     dica: 'Editar',
-                    aoClicar: () => app.exigirNivel(
-                      2,
-                      () => abrirCliente(app, doc),
-                      titulo: 'Editar cliente',
-                    ),
+                    aoClicar: () => abrirCliente(app, doc),
                     largura: TamanhosClientes.botaoEditar.largura,
                     altura: TamanhosClientes.botaoEditar.altura,
                     idLayout: 'TamanhosClientes.botaoEditar',
@@ -398,11 +396,7 @@ class ClientesState extends State<TelaClientes>
               largura: TamanhosClientes.botaoAdicionarCliente.largura,
               altura: TamanhosClientes.botaoAdicionarCliente.altura,
               desabilitado: app.prestador.isEmpty,
-              aoClicar: () => app.exigirNivel(
-                2,
-                () => abrirCliente(app, null),
-                titulo: 'Novo cliente',
-              ),
+              aoClicar: () => abrirCliente(app, null),
               idLayout: 'TamanhosClientes.botaoAdicionarCliente',
             ),
             BotaoIcone(
@@ -418,69 +412,78 @@ class ClientesState extends State<TelaClientes>
           espaco: 4,
           idLayout: 'Grupo.clientes.lin.2',
         ),
-        lin(
-          [
-            CampoTexto(
-              controle: _busca,
-              rotulo: 'Pesquisar cliente',
-              largura: TamanhosClientes.campoPesquisarCliente.largura,
-              iconePrefixo: const Icon(Icons.search),
-              aoMudar: (_) => _aoVivo.tecla(() {
-                if (app.navAtual == 1) _reaplicar();
-              }, viva: () => app.viva && mounted),
-              altura: TamanhosClientes.campoPesquisarCliente.altura,
-              idLayout: 'TamanhosClientes.campoPesquisarCliente',
+        if (!app.temPermissao('clientes.consultar'))
+          Expanded(
+            child: AcessoRestrito(
+              aoAutorizar: () =>
+                  app.exigirPermissao('clientes.consultar', recarregar),
             ),
-            ListaSuspensa(
-              estado: _ddGrupo,
-              rotulo: 'Grupo',
-              largura: TamanhosClientes.campoGrupo.largura!,
-              desabilitado: app.prestador.isEmpty,
-              aoSelecionar: (escolha) {
-                gruposSel =
-                    (escolha == null || escolha.isEmpty || escolha == todos)
-                    ? null
-                    : {escolha};
-                _reaplicar();
-              },
-              altura: TamanhosClientes.campoGrupo.altura,
-              idLayout: 'TamanhosClientes.campoGrupo',
-            ),
-          ],
-          quebra: true,
-          idLayout: 'Grupo.clientes.lin.3',
-        ),
-        Tx(
-          _cache == null
-              ? ''
-              : (total == 0
-                    ? 'Nenhum cliente encontrado com esse filtro.'
-                    : '$total cliente(s).'),
-          italico: true,
-          cor: Colors.grey.shade600,
-          largura: TamanhosClientes
-              .rotuloCacheNullTotal0NenhumClienteEncontradoCom
-              .largura,
-          altura: TamanhosClientes
-              .rotuloCacheNullTotal0NenhumClienteEncontradoCom
-              .altura,
-          idLayout: 'TamanhosClientes.rotuloCacheNullTotal0NenhumClienteEncontradoCom',
-        ),
-        Expanded(child: tabela),
-        divisor(altura: 1),
-        BarraPaginacao(
-          pagina: _pagina,
-          paginas: paginas,
-          porPagina: _porPagina,
-          controleIr: _irPara,
-          aoIr: _irPagina,
-          aoPorPagina: (n) {
-            if (n == _porPagina) return;
-            _porPagina = n;
-            _pagina = 0;
-            _redesenhar();
-          },
-        ),
+          )
+        else ...[
+          lin(
+            [
+              CampoTexto(
+                controle: _busca,
+                rotulo: 'Pesquisar cliente',
+                largura: TamanhosClientes.campoPesquisarCliente.largura,
+                iconePrefixo: const Icon(Icons.search),
+                aoMudar: (_) => _aoVivo.tecla(() {
+                  if (app.navAtual == 1) _reaplicar();
+                }, viva: () => app.viva && mounted),
+                altura: TamanhosClientes.campoPesquisarCliente.altura,
+                idLayout: 'TamanhosClientes.campoPesquisarCliente',
+              ),
+              ListaSuspensa(
+                estado: _ddGrupo,
+                rotulo: 'Grupo',
+                largura: TamanhosClientes.campoGrupo.largura!,
+                desabilitado: app.prestador.isEmpty,
+                aoSelecionar: (escolha) {
+                  gruposSel =
+                      (escolha == null || escolha.isEmpty || escolha == todos)
+                      ? null
+                      : {escolha};
+                  _reaplicar();
+                },
+                altura: TamanhosClientes.campoGrupo.altura,
+                idLayout: 'TamanhosClientes.campoGrupo',
+              ),
+            ],
+            quebra: true,
+            idLayout: 'Grupo.clientes.lin.3',
+          ),
+          Tx(
+            _cache == null
+                ? ''
+                : (total == 0
+                      ? 'Nenhum cliente encontrado com esse filtro.'
+                      : '$total cliente(s).'),
+            italico: true,
+            cor: Colors.grey.shade600,
+            largura: TamanhosClientes
+                .rotuloCacheNullTotal0NenhumClienteEncontradoCom
+                .largura,
+            altura: TamanhosClientes
+                .rotuloCacheNullTotal0NenhumClienteEncontradoCom
+                .altura,
+            idLayout: 'TamanhosClientes.rotuloCacheNullTotal0NenhumClienteEncontradoCom',
+          ),
+          Expanded(child: tabela),
+          divisor(altura: 1),
+          BarraPaginacao(
+            pagina: _pagina,
+            paginas: paginas,
+            porPagina: _porPagina,
+            controleIr: _irPara,
+            aoIr: _irPagina,
+            aoPorPagina: (n) {
+              if (n == _porPagina) return;
+              _porPagina = n;
+              _pagina = 0;
+              _redesenhar();
+            },
+          ),
+        ],
       ],
       espaco: 16,
       idLayout: 'Grupo.clientes.col.1',

@@ -13,7 +13,12 @@ fn forcados(a: &Value, nome: &str) -> Res<Forcados> {
     for item in a.get(nome).and_then(Value::as_array).into_iter().flatten() {
         let t = |i: usize| item.get(i).and_then(Value::as_str);
         match (t(0), t(1), t(2)) {
-            (Some(s), Some(o), Some(v)) => crate::config_dps::forcar(&mut out, s, o, v),
+            (Some(s), Some(o), Some(v)) => {
+                if o.eq_ignore_ascii_case("chSubstda") {
+                    crate::permissoes::exigir("consultar.substituir")?;
+                }
+                crate::config_dps::forcar(&mut out, s, o, v);
+            }
             _ => {
                 return Err(Erro::valor(format!(
                     "Override inválido (esperado (secao, opcao)): {item}"

@@ -136,7 +136,9 @@ class _CascaState extends State<Casca> {
                 idLayout: 'TamanhosNavegacao.rotuloNenhumPrestadorLiberadoParaEsteUsuario',
               ),
               Tx(
-                app.pode(3) ? 'Libere os prestadores que deseja operar.' : 'Para operar, peça a um usuário de nível 3 para liberar um prestador para você.',
+                app.temPermissao('usuarios.prestadores')
+                    ? 'Libere os prestadores que deseja operar.'
+                    : 'Para operar, peça a um usuário autorizado para liberar um prestador para você.',
                 tam: Letra.texto,
                 cor: Colors.grey.shade700,
                 alinhar: TextAlign.center,
@@ -149,12 +151,11 @@ class _CascaState extends State<Casca> {
                 idLayout:
                     'TamanhosNavegacao.rotuloParaOperarPecaAUmUsuarioDeNivel',
               ),
-              if (app.pode(3))
+              if (app.temPermissao('usuarios.prestadores'))
                 Botao(
                   'Liberar prestadores',
                   icone: Icons.add_link,
-                  aoClicar: () =>
-                      gerirPrestadores(app, app.usuario, app.usuario),
+                  aoClicar: () => gerirPrestadores(app, app.usuario),
                 ),
             ],
             cruzado: CrossAxisAlignment.center,
@@ -188,11 +189,7 @@ class _CascaState extends State<Casca> {
         BotaoIcone(
           Icons.add_business,
           dica: 'Adicionar prestador',
-          aoClicar: () => app.exigirNivel(
-            3,
-            () => abrirNovoPrestador(app),
-            titulo: 'Adicionar prestador',
-          ),
+          aoClicar: () => abrirNovoPrestador(app),
           largura: TamanhosNavegacao.botaoAdicionarPrestador.largura,
           altura: TamanhosNavegacao.botaoAdicionarPrestador.altura,
           idLayout: 'TamanhosNavegacao.botaoAdicionarPrestador',
@@ -200,8 +197,7 @@ class _CascaState extends State<Casca> {
         BotaoIcone(
           Icons.group,
           dica: 'Usuários',
-          aoClicar: () =>
-              app.exigirNivel(3, () => abrirUsuarios(app), titulo: 'Usuários'),
+          aoClicar: () => abrirUsuarios(app),
           largura: TamanhosNavegacao.botaoUsuarios.largura,
           altura: TamanhosNavegacao.botaoUsuarios.altura,
           idLayout: 'TamanhosNavegacao.botaoUsuarios',
@@ -288,7 +284,20 @@ class _Telas extends StatelessWidget {
                 enabled: app.navAtual == i,
                 child: ExcludeFocus(
                   excluding: app.navAtual != i,
-                  child: TravaDaVez(aVista: app.navAtual == i, child: telas[i]),
+                  child: Visibility(
+                    visible: app.temPermissao(App.modulosNavegacao[i]),
+                    maintainState: true,
+                    replacement: AcessoRestrito(
+                      aoAutorizar: () => app.exigirPermissao(
+                        App.modulosNavegacao[i],
+                        app.atualizar,
+                      ),
+                    ),
+                    child: TravaDaVez(
+                      aVista: app.navAtual == i,
+                      child: telas[i],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -423,7 +432,7 @@ class _TrilhoState extends State<_Trilho> {
       ];
       // Sem prestador ativo (instalação nova, ou o último foi excluído) não há o que emitir,
       // cadastrar, consultar nem sincronizar: os quatro destinos ficam apagados e só as
-      // Configurações (Personalização e Avançado › Backup) continuam disponíveis.
+      // Configurações continuam disponíveis, inclusive Avançado › Backup.
       final semAtivo = app.prestador.isEmpty;
       final parado = travado(context) || semAtivo;
       // Tema ESCOPADO do trilho: primary translúcido vira a cor de hover dos destinos.

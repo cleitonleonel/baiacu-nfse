@@ -269,6 +269,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
 
   /// Consulta o banco de notas e mostra a página atual.
   void carregarPagina() {
+    if (!app.temPermissao('cofre.pesquisar')) return;
     _carregadoPrest = app.prestador;
     var notas = <Map<String, dynamic>>[];
     var total = 0;
@@ -458,6 +459,10 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
   /// produção E homologação, conforme as Configurações. Roda em segundo plano; a tela
   /// acompanha os lotes e pode cancelar.
   void _sincronizar() {
+    if (!app.temPermissao('cofre.sincronizar')) {
+      app.exigirPermissao('cofre.sincronizar', () => _sincronizar());
+      return;
+    }
     if (_sincAtiva) return; // já está sincronizando
     if (app.prestador.isEmpty) {
       app.toast('Selecione um prestador.', erro: true);
@@ -613,6 +618,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
   }
 
   Future<void> _autoTique() async {
+    if (!app.temPermissao('cofre.sincronizar', somenteLogado: true)) return;
     if (!app.viva || _autoRodando) return;
     try {
       if (!_autoCuidou) {
@@ -710,6 +716,10 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
 
   /// Gera a DANFSe do XML guardado e abre. O PDF vai para a pasta temporária do sistema.
   void _abrirDanfse(Map<String, dynamic> n) {
+    if (!app.temPermissao('cofre.pdf')) {
+      app.exigirPermissao('cofre.pdf', () => _abrirDanfse(n));
+      return;
+    }
     final prest = app.prestador;
     app.emSegundoPlano(() async {
       String pdf;
@@ -731,6 +741,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
   }
 
   Future<void> _salvarXml(Map<String, dynamic> n) async {
+    if (!await app.autorizarAcao('cofre.xml')) return;
     String? destino;
     try {
       destino = await salvarArquivo(
@@ -754,6 +765,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
   }
 
   Future<void> _salvarDanfse(Map<String, dynamic> n) async {
+    if (!await app.autorizarAcao('cofre.pdf')) return;
     String? destino;
     try {
       destino = await salvarArquivo(
@@ -789,6 +801,10 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
   /// busca. Embaixo, o que sai e como SEPARAR o resultado: por mês/ano e por emitidas/
   /// recebidas. Tudo vai para UM arquivo .zip.
   void _abrirExportar() {
+    if (!app.temPermissao('cofre.exportar')) {
+      app.exigirPermissao('cofre.exportar', () => _abrirExportar());
+      return;
+    }
     if (app.prestador.isEmpty) {
       app.toast('Selecione um prestador.', erro: true);
       return;
@@ -1619,88 +1635,97 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
               .altura,
           idLayout: 'TamanhosCofre.rotuloTodasAsNotasDestePrestadorEmitidasERecebidas',
         ),
-        lin(
-          [
-            CampoTexto(
-              controle: _busca,
-              rotulo: rotuloDaBusca,
-              largura: TamanhosCofre.campoRotuloDaBusca.largura,
-              iconePrefixo: const Icon(Icons.search),
-              aoMudar: (_) => _aoVivo.tecla(() {
-                if (app.navAtual != 4) return;
-                _pagina = 0;
-                carregarPagina();
-              }, viva: () => app.viva && mounted),
-              altura: TamanhosCofre.campoRotuloDaBusca.altura,
-              idLayout: 'TamanhosCofre.campoRotuloDaBusca',
+        if (!app.temPermissao('cofre.pesquisar'))
+          Expanded(
+            child: AcessoRestrito(
+              aoAutorizar: () =>
+                  app.exigirPermissao('cofre.pesquisar', carregarPagina),
             ),
-            ListaSuspensa(
-              estado: _ddTipo,
-              rotulo: 'Tipo',
-              largura: TamanhosCofre.campoTipo2.largura!,
-              aoSelecionar: (_) => _filtroMudou(),
-              altura: TamanhosCofre.campoTipo2.altura,
-              idLayout: 'TamanhosCofre.campoTipo2',
-            ),
-            ListaSuspensa(
-              estado: _ddPeriodo,
-              rotulo: 'Período',
-              largura:
-                  TamanhosCofre.campoPeriodo2.largura ??
-                  (_intervalo.isEmpty
-                      ? _larguraPeriodo
-                      : larguraPeriodoComDatas),
-              aoSelecionar: _aoPeriodo,
-              altura: TamanhosCofre.campoPeriodo2.altura,
-              idLayout: 'TamanhosCofre.campoPeriodo2',
-            ),
-            ListaSuspensa(
-              estado: _ddAmbiente,
-              rotulo: 'Ambiente',
-              largura: TamanhosCofre.campoAmbiente2.largura!,
-              aoSelecionar: (_) => _filtroMudou(),
-              altura: TamanhosCofre.campoAmbiente2.altura,
-              idLayout: 'TamanhosCofre.campoAmbiente2',
-            ),
-            ListaSuspensa(
-              estado: _ddSituacao,
-              rotulo: 'Situação',
-              largura: TamanhosCofre.campoSituacao2.largura!,
-              aoSelecionar: (_) => _filtroMudou(),
-              altura: TamanhosCofre.campoSituacao2.altura,
-              idLayout: 'TamanhosCofre.campoSituacao2',
-            ),
-          ],
-          quebra: true,
-          idLayout: 'Grupo.cofre.lin.7',
-        ),
-        Tx(
-          _vazio,
-          italico: true,
-          cor: _vazioErro ? Colors.red.shade700 : Colors.grey.shade600,
-          largura: TamanhosCofre.rotuloVazio.largura,
-          altura: TamanhosCofre.rotuloVazio.altura,
-          idLayout: 'TamanhosCofre.rotuloVazio',
-        ),
-        Expanded(child: tabela),
-        divisor(altura: 1),
-        BarraPaginacao(
-          pagina: _pagina,
-          paginas: paginas,
-          porPagina: _porPagina,
-          controleIr: _irPara,
-          rotulo: _carregadoPrest == null ? '' : null,
-          aoIr: (p) {
-            _pagina = math.max(0, p);
-            carregarPagina();
-          },
-          aoPorPagina: (n) {
-            if (n == _porPagina) return;
-            _porPagina = n;
-            _pagina = 0;
-            carregarPagina();
-          },
-        ),
+          )
+        else ...[
+          lin(
+            [
+              CampoTexto(
+                controle: _busca,
+                rotulo: rotuloDaBusca,
+                largura: TamanhosCofre.campoRotuloDaBusca.largura,
+                iconePrefixo: const Icon(Icons.search),
+                aoMudar: (_) => _aoVivo.tecla(() {
+                  if (app.navAtual != 4) return;
+                  _pagina = 0;
+                  carregarPagina();
+                }, viva: () => app.viva && mounted),
+                altura: TamanhosCofre.campoRotuloDaBusca.altura,
+                idLayout: 'TamanhosCofre.campoRotuloDaBusca',
+              ),
+              ListaSuspensa(
+                estado: _ddTipo,
+                rotulo: 'Tipo',
+                largura: TamanhosCofre.campoTipo2.largura!,
+                aoSelecionar: (_) => _filtroMudou(),
+                altura: TamanhosCofre.campoTipo2.altura,
+                idLayout: 'TamanhosCofre.campoTipo2',
+              ),
+              ListaSuspensa(
+                estado: _ddPeriodo,
+                rotulo: 'Período',
+                largura:
+                    TamanhosCofre.campoPeriodo2.largura ??
+                    (_intervalo.isEmpty
+                        ? _larguraPeriodo
+                        : larguraPeriodoComDatas),
+                aoSelecionar: _aoPeriodo,
+                altura: TamanhosCofre.campoPeriodo2.altura,
+                idLayout: 'TamanhosCofre.campoPeriodo2',
+              ),
+              ListaSuspensa(
+                estado: _ddAmbiente,
+                rotulo: 'Ambiente',
+                largura: TamanhosCofre.campoAmbiente2.largura!,
+                aoSelecionar: (_) => _filtroMudou(),
+                altura: TamanhosCofre.campoAmbiente2.altura,
+                idLayout: 'TamanhosCofre.campoAmbiente2',
+              ),
+              ListaSuspensa(
+                estado: _ddSituacao,
+                rotulo: 'Situação',
+                largura: TamanhosCofre.campoSituacao2.largura!,
+                aoSelecionar: (_) => _filtroMudou(),
+                altura: TamanhosCofre.campoSituacao2.altura,
+                idLayout: 'TamanhosCofre.campoSituacao2',
+              ),
+            ],
+            quebra: true,
+            idLayout: 'Grupo.cofre.lin.7',
+          ),
+          Tx(
+            _vazio,
+            italico: true,
+            cor: _vazioErro ? Colors.red.shade700 : Colors.grey.shade600,
+            largura: TamanhosCofre.rotuloVazio.largura,
+            altura: TamanhosCofre.rotuloVazio.altura,
+            idLayout: 'TamanhosCofre.rotuloVazio',
+          ),
+          Expanded(child: tabela),
+          divisor(altura: 1),
+          BarraPaginacao(
+            pagina: _pagina,
+            paginas: paginas,
+            porPagina: _porPagina,
+            controleIr: _irPara,
+            rotulo: _carregadoPrest == null ? '' : null,
+            aoIr: (p) {
+              _pagina = math.max(0, p);
+              carregarPagina();
+            },
+            aoPorPagina: (n) {
+              if (n == _porPagina) return;
+              _porPagina = n;
+              _pagina = 0;
+              carregarPagina();
+            },
+          ),
+        ],
       ],
       espaco: 12,
       idLayout: 'Grupo.cofre.col.5',

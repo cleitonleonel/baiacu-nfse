@@ -79,14 +79,14 @@ pub(crate) fn usuario(a: &Value, nome: &str) -> Res<Usuario> {
     let v = a
         .get(nome)
         .ok_or_else(|| Erro::valor(format!("argumento '{nome}' ausente")))?;
-    Ok(serde_json::from_value(v.clone())?)
+    crate::permissoes::usuario_alvo(serde_json::from_value(v.clone())?)
 }
 
-pub(crate) fn usuario_opcional(a: &Value, nome: &str) -> Res<Option<Usuario>> {
-    match a.get(nome) {
-        None | Some(Value::Null) => Ok(None),
-        Some(v) => Ok(Some(serde_json::from_value(v.clone())?)),
-    }
+fn autorizador(a: &Value, nome: &str, chave: &str) -> Res<Usuario> {
+    let valor = a
+        .get(nome)
+        .ok_or_else(|| Erro::valor("Informe o usuário responsável."))?;
+    crate::permissoes::validar_actor(chave, serde_json::from_value(valor.clone())?)
 }
 
 pub(crate) fn lista_de_textos(a: &Value, nome: &str) -> Vec<String> {
@@ -119,6 +119,10 @@ pub(crate) fn js<T: serde::Serialize>(v: T) -> Res<Value> {
 }
 
 fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
+    if metodo.starts_with("permissoes.") {
+        return crate::permissoes::executar(metodo, a);
+    }
+    crate::permissoes::checar_metodo(metodo, a)?;
     match metodo {
         "nucleo.cancelar" => {
             cancelar(texto(a, "ficha")?);
@@ -127,6 +131,7 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
         // ---- núcleo --------------------------------------------------------------- //
         "nucleo.versao" => js(crate::versao()),
         "nucleo.definir_raiz" => {
+            crate::permissoes::definir_sessao(None)?;
             caminhos::definir_raiz(texto(a, "raiz")?);
             js(caminhos::raiz().to_string_lossy())
         }
@@ -160,10 +165,22 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
         "banco.estado" => js(banco::estado()),
         "banco.destrancado" => js(banco::destrancado()),
         "banco.trancar" => {
+            crate::permissoes::definir_sessao(None)?;
             banco::trancar();
             Ok(Value::Null)
         }
-        "banco.get_meta" => js(banco::get_meta(texto(a, "chave")?)?),
+        "banco.get_meta" => {
+            let chave = texto(a, "chave")?;
+            if !matches!(
+                chave,
+                "ui.pdf_nativo" | "ui.animacao_login" | "ui.minimizar_ao_fechar"
+            ) {
+                return Err(Erro::valor(
+                    "Esta preferência não pode ser consultada diretamente.",
+                ));
+            }
+            js(banco::get_meta(chave)?)
+        }
         "banco.set_meta" => {
             banco::set_meta(texto(a, "chave")?, texto(a, "valor")?)?;
             Ok(Value::Null)
@@ -187,6 +204,9 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
         "chaves.nova_senha_mestra" => js(chaves::nova_senha_mestra()),
         "chaves.criar_banco" => js(chaves::criar_banco()?),
         "chaves.desfazer_criacao" => {
+            if !banco::destrancado() || usuarios::tem_usuarios()? {
+                return Err(Erro::valor("O banco já está protegido ou possui usuários."));
+            }
             chaves::desfazer_criacao();
             Ok(Value::Null)
         }
@@ -220,10 +240,13 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
         )?),
         "usuarios.entrar" => js(usuarios::entrar(texto(a, "login")?, texto(a, "senha")?)?),
         "usuarios.autenticar_por_senha" => {
-            let (u, ambiguo) = usuarios::autenticar_por_senha(
-                texto(a, "senha")?,
-                a.get("nivel_minimo").and_then(Value::as_i64).unwrap_or(1),
-            )?;
+            let senha = texto(a, "senha")?;
+            let (u, ambiguo) = match a.get("permissao").and_then(Value::as_str) {
+                Some(chave) => crate::permissoes::autenticar_autorizacao(chave, senha)?,
+                None => {
+                    usuarios::autenticar_por_senha(senha, a["nivel_minimo"].as_i64().unwrap_or(1))?
+                }
+            };
             Ok(json!({ "usuario": u, "ambiguo": ambiguo }))
         }
         "usuarios.por_login" => js(usuarios::por_login(texto(a, "login")?)?),
@@ -237,7 +260,7 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
             usuarios::vincular_prestador(
                 inteiro(a, "usuario_id")?,
                 texto(a, "prestador")?,
-                usuario_opcional(a, "por")?.as_ref(),
+                &autorizador(a, "por", "usuarios.prestadores")?,
             )?;
             Ok(Value::Null)
         }
@@ -245,7 +268,7 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
             usuarios::desvincular_prestador(
                 inteiro(a, "usuario_id")?,
                 texto(a, "prestador")?,
-                usuario_opcional(a, "por")?.as_ref(),
+                &autorizador(a, "por", "usuarios.prestadores")?,
             )?;
             Ok(Value::Null)
         }
@@ -253,40 +276,54 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
             usuarios::esquecer_prestador(texto(a, "prestador")?)?;
             Ok(Value::Null)
         }
-        "usuarios.criar" => js(usuarios::criar(
-            texto(a, "login")?,
-            texto(a, "nome")?,
-            inteiro(a, "nivel")?,
-            texto(a, "senha")?,
-            &lista_de_textos(a, "prestadores"),
-            usuario_opcional(a, "criado_por")?.as_ref(),
-        )?),
+        "usuarios.criar" => {
+            let prestadores = lista_de_textos(a, "prestadores");
+            let por = if a.get("criado_por").is_none_or(Value::is_null) {
+                None
+            } else {
+                if prestadores.iter().any(|p| !p.trim().is_empty()) {
+                    crate::permissoes::exigir("usuarios.prestadores")?;
+                }
+                Some(autorizador(a, "criado_por", "usuarios.adicionar")?)
+            };
+            js(usuarios::criar(
+                texto(a, "login")?,
+                texto(a, "nome")?,
+                inteiro(a, "nivel")?,
+                texto(a, "senha")?,
+                &prestadores,
+                por.as_ref(),
+            )?)
+        }
         "usuarios.listar" => js(usuarios::listar()?),
         "usuarios.definir_ativo" => {
             usuarios::definir_ativo(
                 inteiro(a, "usuario_id")?,
                 logico(a, "ativo"),
-                &usuario(a, "por")?,
+                &autorizador(a, "por", "usuarios.ativar")?,
             )?;
             Ok(Value::Null)
         }
         "usuarios.promover" => js(usuarios::promover(
             inteiro(a, "usuario_id")?,
-            &usuario(a, "por")?,
+            &autorizador(a, "por", "usuarios.promover")?,
         )?),
         "usuarios.rebaixar" => js(usuarios::rebaixar(
             inteiro(a, "usuario_id")?,
-            &usuario(a, "por")?,
+            &autorizador(a, "por", "usuarios.rebaixar")?,
         )?),
         "usuarios.excluir" => {
-            usuarios::excluir(inteiro(a, "usuario_id")?, &usuario(a, "por")?)?;
+            usuarios::excluir(
+                inteiro(a, "usuario_id")?,
+                &autorizador(a, "por", "usuarios.excluir")?,
+            )?;
             Ok(Value::Null)
         }
         "usuarios.redefinir_senha" => {
             usuarios::redefinir_senha(
                 inteiro(a, "usuario_id")?,
                 texto(a, "nova_senha")?,
-                &usuario(a, "por")?,
+                &autorizador(a, "por", "usuarios.senha")?,
             )?;
             Ok(Value::Null)
         }
@@ -299,11 +336,17 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
             Ok(Value::Null)
         }
         "usuarios.master_login" => js(usuarios::master_login()?),
-        "usuarios.redefinir_senha_master" => js(usuarios::redefinir_senha_master(
-            texto(a, "nova_senha")?,
-            texto_ou(a, "novo_login", ""),
-            texto_ou(a, "novo_nome", ""),
-        )?),
+        "usuarios.redefinir_senha_master" => {
+            if !chaves::destrancar_com_mestra(texto(a, "senha_mestra")?)? {
+                return Err(Erro::valor("Senha mestra incorreta."));
+            }
+            crate::permissoes::definir_sessao(None)?;
+            js(usuarios::redefinir_senha_master(
+                texto(a, "nova_senha")?,
+                texto_ou(a, "novo_login", ""),
+                texto_ou(a, "novo_nome", ""),
+            )?)
+        }
         "usuarios.get_foto" => {
             js(usuarios::get_foto(inteiro(a, "usuario_id")?)?.map(|b| STANDARD.encode(b)))
         }

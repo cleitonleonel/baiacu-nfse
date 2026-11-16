@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 /// Mantém o SVG original e suaviza detalhes pequenos com superamostragem.
+/// A redução usa mipmaps (medium): o filtro cúbico (high) não cobre os muitos
+/// pixels de origem por pixel de destino e produz serrilhado nos traços finos.
 class IconeSvgSuave extends StatelessWidget {
   const IconeSvgSuave(this.asset, {super.key, this.tamanho = 28});
   final String asset;
@@ -36,7 +38,7 @@ class IconeSvgSuave extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pixels = (tamanho * MediaQuery.devicePixelRatioOf(context) * 4)
+    final pixels = (tamanho * MediaQuery.devicePixelRatioOf(context) * 8)
         .ceil();
     final imagem = _imagens.putIfAbsent((
       asset,
@@ -47,7 +49,11 @@ class IconeSvgSuave extends StatelessWidget {
       child: FutureBuilder<ui.Image>(
         future: imagem,
         builder: (context, estado) => estado.hasData
-            ? RawImage(image: estado.data, filterQuality: FilterQuality.high)
+            ? RawImage(
+                image: estado.data,
+                isAntiAlias: true,
+                filterQuality: FilterQuality.medium,
+              )
             : SvgPicture.asset(asset, width: tamanho, height: tamanho),
       ),
     );

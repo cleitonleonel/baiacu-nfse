@@ -75,6 +75,16 @@ pub fn verify(envelope: &[u8], key: &str, expected: &str) -> Result<Manifest> {
     Ok(m)
 }
 
+/// Valida o pacote persistido pelo serviço, sempre usando a versão confirmada.
+pub fn verify_prepared(stage: &Path, key: &str, version: &str) -> Result<Manifest> {
+    no_links(stage)?;
+    let manifest = verify(&fs::read(stage.join("release.sig.json"))?, key, version)?;
+    if hash(&stage.join("release.zip"))? != manifest.sha256.to_ascii_lowercase() {
+        return Err("O pacote preparado foi alterado ou está incompleto".into());
+    }
+    Ok(manifest)
+}
+
 pub fn hash(path: &Path) -> Result<String> {
     let mut file = fs::File::open(path)?;
     let mut h = Sha256::new();

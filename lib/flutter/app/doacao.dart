@@ -41,7 +41,10 @@ class _BotaoContribuirState extends State<BotaoContribuir> {
     onEnter: (_) => setState(() => _sobre = true),
     onExit: (_) => setState(() => _sobre = false),
     child: GestureDetector(
-      onTap: () => abrirDoacao(widget.app),
+      onTap: () => widget.app.exigirPermissao(
+        'config.apoio',
+        () => abrirDoacao(widget.app),
+      ),
       // Um degradê só, do claro ao vivo: animar de cor sólida para degradê passa por um fundo
       // vazio (o "branco" no meio do caminho).
       child: TweenAnimationBuilder<double>(
@@ -100,6 +103,7 @@ class _BotaoContribuirState extends State<BotaoContribuir> {
 /// Abre a janela de doação. [primeira]: logo depois da primeira NFS-e em produção (comemora,
 /// com título próprio e fogos).
 void abrirDoacao(App app, {bool primeira = false, VoidCallback? aoFechar}) {
+  if (!app.temPermissao('config.apoio', somenteLogado: primeira)) return;
   Map<String, dynamic> info;
   try {
     info = jaMapa('doacao.info');
@@ -133,6 +137,7 @@ class _JanelaDoacao {
 
   final App app;
   final Map<String, dynamic> info;
+
   /// Logo depois da primeira NFS-e em produção: comemora (título e fogos).
   final bool _primeira;
   Dialogo? dialogo;

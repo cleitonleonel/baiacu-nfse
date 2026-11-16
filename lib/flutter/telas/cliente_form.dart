@@ -77,6 +77,14 @@ String _cima(String? s) => (s ?? '').trim().toUpperCase();
 /// [aba]/[slug]: aba e serviço com que a janela abre (usados ao REABRIR o cadastro quando o
 /// Esc cancela uma edição — o usuário volta para onde estava).
 void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
+  final chave = tomador == null ? 'clientes.adicionar' : 'clientes.editar';
+  if (!app.temPermissao(chave)) {
+    app.exigirPermissao(
+      chave,
+      () => abrirCliente(app, tomador, aba: aba, slug: slug),
+    );
+    return;
+  }
   // Cliente é sempre de UM prestador: sem prestador ativo não há onde cadastrar.
   if (app.prestador.isEmpty) {
     app.toast('Selecione um prestador.', erro: true);
@@ -97,7 +105,7 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
   final gruposDisp = p.isEmpty
       ? <String>[]
       : ja<List>('cadastro.list_grupos', {'prestador': p}).cast<String>();
-  final grupoAtual = editando
+  var grupoAtual = editando
       ? ja<String>('cadastro.get_tomador_grupo', {
           'prestador': p,
           'tomador': fs('documento'),
@@ -881,6 +889,10 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
   }
 
   void novoServico() {
+    if (!app.temPermissao('clientes.servicos')) {
+      app.exigirPermissao('clientes.servicos', novoServico);
+      return;
+    }
     if (temServico()) servicos[slugAtual] = coletarServico();
     final s = proximoSlug();
     servicos[s] = servicoPadrao()..['nome'] = 'Serviço ${_numeroDoSlug(s)}';
@@ -916,6 +928,10 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
   /// Exclusão exige digitar "deletar" (mesmo padrão do excluir cliente).
   void pedirExcluirServico() {
     if (!temServico()) return;
+    if (!app.temPermissao('clientes.servicos')) {
+      app.exigirPermissao('clientes.servicos', pedirExcluirServico);
+      return;
+    }
     final nomeServ = ((servicos[slugAtual]!['nome'] as String?) ?? '').isEmpty
         ? slugAtual
         : servicos[slugAtual]!['nome'] as String;
@@ -1038,6 +1054,10 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
 
   void buscarDados(bool cnpj) {
     if (!editaDados) return;
+    if (!app.temPermissao('clientes.consulta_publica')) {
+      app.exigirPermissao('clientes.consulta_publica', () => buscarDados(cnpj));
+      return;
+    }
     final esperado = cnpj ? soDoc(fDoc.text) : soDigitos(fCep.text);
     final tamanho = cnpj ? 14 : 8;
     final rotulo = cnpj ? 'CNPJ' : 'CEP';
@@ -1071,6 +1091,23 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
     final tudo = !jaSalvo;
     final comDados = tudo || abaAtual == 0;
     final comServ = tudo || abaAtual == 1;
+    final regraDados = jaSalvo ? 'clientes.editar' : 'clientes.adicionar';
+    final grupo = fGrupo.valor == semGrupo ? '' : fGrupo.valor ?? '';
+    final mudarGrupo = comDados && grupo != grupoAtual;
+    if (comDados && !app.temPermissao(regraDados)) {
+      app.exigirPermissao(regraDados, salvar);
+      return;
+    }
+    if (comServ &&
+        (ordem.isNotEmpty || removidos.isNotEmpty) &&
+        !app.temPermissao('clientes.servicos')) {
+      app.exigirPermissao('clientes.servicos', salvar);
+      return;
+    }
+    if (mudarGrupo && !app.temPermissao('clientes.grupos')) {
+      app.exigirPermissao('clientes.grupos', salvar);
+      return;
+    }
     final erros = <String>[];
     Map<String, dynamic>? novo;
     if (comDados) {
@@ -1142,7 +1179,7 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
       app.toast('Corrija: ${erros.join('; ')}', erro: true);
       return;
     }
-    if (novo != null) {
+    if (mudarGrupo && novo != null) {
       // Documento já cadastrado? NÃO substitui em silêncio — manda editar o existente.
       final docNovo = soDoc(novo['documento'] as String);
       final existe = ja<bool>('cadastro.tomador_cadastrado', {
@@ -1211,8 +1248,9 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
         ja<Object?>('cadastro.set_tomador_grupo', {
           'prestador': p,
           'tomador': novo['documento'],
-          'grupo': fGrupo.valor ?? '',
+          'grupo': grupo,
         });
+        grupoAtual = grupo;
       } catch (e) {
         app.toast('$e', erro: true);
         return;
@@ -1577,9 +1615,9 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
                   showCheckboxColumn: false,
                   horizontalMargin: 0,
                   columnSpacing: 0,
-                  headingRowHeight: 36,
-                  dataRowMinHeight: 44,
-                  dataRowMaxHeight: 44,
+                  headingRowHeight: 32,
+                  dataRowMinHeight: 40,
+                  dataRowMaxHeight: 40,
                   dividerThickness: 0,
                   border: SeparadoresTabela(
                     grade: true,
@@ -1598,15 +1636,14 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
                         label: celula(
                           i,
                           Padding(
-                            padding: EdgeInsets.only(
-                              left: i == 0 ? 38 : 6,
-                              right: 6,
-                            ),
-                            child: Tx(
-                              titulo,
-                              tam: 13,
-                              peso: FontWeight.bold,
-                              idLayout: 'Cliente.contato.cabecalho:$titulo',
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            child: Center(
+                              child: Tx(
+                                titulo,
+                                tam: 13,
+                                peso: FontWeight.bold,
+                                idLayout: 'Cliente.contato.cabecalho:$titulo',
+                              ),
                             ),
                           ),
                         ),
@@ -1759,6 +1796,15 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
             'Adicionar contato',
             icone: Icons.add,
             aoClicar: () {
+              if (informacoes.any(
+                (c) => !c.principal && c.valor.text.trim().isEmpty,
+              )) {
+                app.toast(
+                  'Preencha o contato adicional vazio antes de adicionar outro.',
+                  erro: true,
+                );
+                return;
+              }
               informacoes.add(_ContatoCliente(d, 'telefone', '', '', false));
               acertarPrincipais();
               d.atualizar();
@@ -2789,10 +2835,9 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
             'Excluir cliente',
             icone: Icons.delete_forever,
             cor: Colors.red.shade700,
-            aoClicar: () => app.exigirNivel(
-              2,
+            aoClicar: () => app.exigirPermissao(
+              'clientes.excluir',
               () => _confirmarExcluirCliente(app, docSalvo, _cima(fNome.text)),
-              titulo: 'Excluir cliente',
             ),
             largura: TamanhosServicosTributos.botaoExcluirCliente.largura,
             altura: TamanhosServicosTributos.botaoExcluirCliente.altura,
@@ -2833,15 +2878,18 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
             'Editar',
             desabilitado: abaAtual == 1 && !temServico(),
             icone: Icons.edit,
-            aoClicar: () {
-              // Só a aba à vista entra em edição; a outra continua como estava.
-              if (abaAtual == 1) {
-                editaServ = true;
-              } else {
-                editaDados = true;
-              }
-              acertar();
-            },
+            aoClicar: () => app.exigirPermissao(
+              abaAtual == 1 ? 'clientes.servicos' : 'clientes.editar',
+              () {
+                // Só a aba à vista entra em edição; a outra continua como estava.
+                if (abaAtual == 1) {
+                  editaServ = true;
+                } else {
+                  editaDados = true;
+                }
+                acertar();
+              },
+            ),
             largura: TamanhosServicosTributos.botaoEditar.largura,
             altura: TamanhosServicosTributos.botaoEditar.altura,
             idLayout: 'TamanhosServicosTributos.botaoEditar',

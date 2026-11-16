@@ -9,6 +9,7 @@ import '../kit/campo.dart';
 import '../kit/flet.dart';
 import 'app.dart';
 import 'menu_usuario.dart';
+import 'permissoes_nivel.dart';
 
 const _porPagina = 25;
 const _nomesNivel = {1: 'Nível 1', 2: 'Nível 2', 3: 'Nível 3', 4: 'Nível 4'};
@@ -18,8 +19,10 @@ List<Usuario> _listar() => [
 ];
 
 void abrirUsuarios(App app) {
-  // "por" é quem autorizou a tela (nível 3+) — ou o próprio operador, se já tiver nível.
-  final por = app.autorizador ?? app.usuario;
+  if (!app.temPermissao('usuarios.listar')) {
+    app.exigirPermissao('usuarios.listar', () => abrirUsuarios(app));
+    return;
+  }
   late final Dialogo d;
   var lista = _listar();
   var pagina = 0;
@@ -30,6 +33,14 @@ void abrirUsuarios(App app) {
   }
 
   void acao(String metodo, String nome, Map<String, Object?> args) {
+    final chave = metodo == 'usuarios.definir_ativo'
+        ? 'usuarios.ativar'
+        : metodo;
+    final por = app.autorizadorDaAcao(chave);
+    if (por == null) {
+      app.exigirPermissao(chave, () => acao(metodo, nome, args));
+      return;
+    }
     try {
       ja<Object?>(metodo, {...args, 'por': por.paraJson()});
     } catch (e) {
@@ -41,7 +52,7 @@ void abrirUsuarios(App app) {
   }
 
   Widget linha(Usuario u) {
-    final podeGerir = u.nivel < por.nivel;
+    final podeGerir = !u.master && u.id != app.usuario.id;
     // Sempre em LINHA ÚNICA: o que estoura vira "…" com o texto completo na dica.
     final login = '${u.ativo ? '● ' : '○ '}${u.login.toUpperCase()}';
     final nome = (u.nome.isEmpty ? '—' : u.nome).toUpperCase();
@@ -121,8 +132,7 @@ void abrirUsuarios(App app) {
                           Icons.password,
                           dica: 'Redefinir senha',
                           tamanho: 18,
-                          aoClicar: () =>
-                              _redefinirSenha(app, por, u, recarregar),
+                          aoClicar: () => _redefinirSenha(app, u, recarregar),
                           largura: TamanhosUsuarios.botaoRedefinirSenha.largura,
                           altura: TamanhosUsuarios.botaoRedefinirSenha.altura,
                           idLayout: 'TamanhosUsuarios.botaoRedefinirSenha',
@@ -131,7 +141,7 @@ void abrirUsuarios(App app) {
                           Icons.storefront,
                           dica: 'Prestadores que pode operar',
                           tamanho: 18,
-                          aoClicar: () => gerirPrestadores(app, por, u),
+                          aoClicar: () => gerirPrestadores(app, u),
                           largura: TamanhosUsuarios
                               .botaoPrestadoresQuePodeOperar
                               .largura,
@@ -147,7 +157,7 @@ void abrirUsuarios(App app) {
                           dica: 'Excluir (apagar) usuário',
                           tamanho: 18,
                           aoClicar: () =>
-                              _confirmarExclusao(app, por, u, recarregar),
+                              _confirmarExclusao(app, u, recarregar),
                           largura: TamanhosUsuarios
                               .botaoExcluirApagarUsuario
                               .largura,
@@ -162,13 +172,13 @@ void abrirUsuarios(App app) {
                       idLayout: 'Grupo.usuarios.lin.2:${u.id}',
                     ),
                   )
-                : (u.id == app.usuario.id && app.pode(3) && !u.master)
+                : (u.id == app.usuario.id && !u.master)
                 ? Center(
                     child: BotaoIcone(
                       Icons.storefront,
                       dica: 'Prestadores que pode operar',
                       tamanho: 18,
-                      aoClicar: () => gerirPrestadores(app, app.usuario, u),
+                      aoClicar: () => gerirPrestadores(app, u),
                       idLayout:
                           'TamanhosUsuarios.botaoPrestadoresQuePodeOperar:${u.id}:proprio',
                     ),
@@ -234,8 +244,7 @@ void abrirUsuarios(App app) {
                           altura: TamanhosUsuarios
                               .rotuloNenhumUsuarioCadastradoAinda
                               .altura,
-                          idLayout:
-                              'TamanhosUsuarios.rotuloNenhumUsuarioCadastradoAinda',
+                          idLayout: 'TamanhosUsuarios.rotuloNenhumUsuarioCadastradoAinda',
                         ),
                       ]
                     : [for (final u in visiveis) linha(u)],
@@ -270,8 +279,7 @@ void abrirUsuarios(App app) {
                     altura: TamanhosUsuarios
                         .rotuloPaginaPagina1DePaginasTotalUsuarioS
                         .altura,
-                    idLayout:
-                        'TamanhosUsuarios.rotuloPaginaPagina1DePaginasTotalUsuarioS',
+                    idLayout: 'TamanhosUsuarios.rotuloPaginaPagina1DePaginasTotalUsuarioS',
                   ),
                   BotaoIcone(
                     Icons.chevron_right,
@@ -296,22 +304,40 @@ void abrirUsuarios(App app) {
       );
     },
     acoes: (_) => [
-      if (por.nivel > 1)
-        Botao(
-          'Adicionar usuário',
-          icone: Icons.person_add,
-          aoClicar: () => _novoUsuario(app, por, recarregar),
-          largura: TamanhosUsuarios.botaoAdicionarUsuario.largura,
-          altura: TamanhosUsuarios.botaoAdicionarUsuario.altura,
-          idLayout: 'TamanhosUsuarios.botaoAdicionarUsuario',
+      SizedBox(
+        width: 710,
+        child: Row(
+          children: [
+            if (app.usuario.nivel == 4)
+              Botao.contorno(
+                'Permissões de nível',
+                icone: Icons.admin_panel_settings,
+                aoClicar: () => abrirPermissoesNivel(app),
+              ),
+            const Spacer(),
+            Botao(
+              'Adicionar usuário',
+              icone: Icons.person_add,
+              aoClicar: () => _novoUsuario(app, recarregar),
+            ),
+          ],
         ),
+      ),
     ],
     idLayout: 'Janela.usuarios.Dialogo.1',
   );
   app.mostrarDialogo(d);
 }
 
-void _novoUsuario(App app, Usuario por, VoidCallback recarregar) {
+void _novoUsuario(App app, VoidCallback recarregar) {
+  final por = app.autorizadorDaAcao('usuarios.adicionar');
+  if (por == null) {
+    app.exigirPermissao(
+      'usuarios.adicionar',
+      () => _novoUsuario(app, recarregar),
+    );
+    return;
+  }
   final teto = por.nivel - 1;
   final niveis = [
     for (final n in const [1, 2, 3])
@@ -340,6 +366,9 @@ void _novoUsuario(App app, Usuario por, VoidCallback recarregar) {
       return;
     }
     final docs = escolhidos.toList()..sort();
+    if (docs.isNotEmpty && !await app.autorizarAcao('usuarios.prestadores'))
+      return;
+    if (!d.aberto) return;
     Usuario novo;
     try {
       novo = Usuario.deJson(
@@ -447,8 +476,7 @@ void _novoUsuario(App app, Usuario por, VoidCallback recarregar) {
                 altura: TamanhosUsuarios
                     .rotuloPrestadoresQueEsteUsuarioPodeOperar
                     .altura,
-                idLayout:
-                    'TamanhosUsuarios.rotuloPrestadoresQueEsteUsuarioPodeOperar',
+                idLayout: 'TamanhosUsuarios.rotuloPrestadoresQueEsteUsuarioPodeOperar',
               ),
               if (prestadores.isEmpty)
                 Tx(
@@ -461,8 +489,7 @@ void _novoUsuario(App app, Usuario por, VoidCallback recarregar) {
                   altura: TamanhosUsuarios
                       .rotuloNenhumPrestadorCadastradoCrieUmPrestadorAntes
                       .altura,
-                  idLayout:
-                      'TamanhosUsuarios.rotuloNenhumPrestadorCadastradoCrieUmPrestadorAntes',
+                  idLayout: 'TamanhosUsuarios.rotuloNenhumPrestadorCadastradoCrieUmPrestadorAntes',
                 )
               else
                 col(
@@ -525,7 +552,15 @@ void _novoUsuario(App app, Usuario por, VoidCallback recarregar) {
 }
 
 /// Ver/adicionar/remover os prestadores que o usuário pode operar, no lugar.
-void gerirPrestadores(App app, Usuario por, Usuario alvo) {
+void gerirPrestadores(App app, Usuario alvo) {
+  final por = app.autorizadorDaAcao('usuarios.prestadores');
+  if (por == null) {
+    app.exigirPermissao(
+      'usuarios.prestadores',
+      () => gerirPrestadores(app, alvo),
+    );
+    return;
+  }
   if (alvo.master) {
     app.toast('O master já opera todos os prestadores.', erro: true);
     return;
@@ -600,8 +635,7 @@ void gerirPrestadores(App app, Usuario por, Usuario alvo) {
             altura: TamanhosUsuarios
                 .rotuloPrestadoresQueEsteUsuarioPodeAlternarOperar
                 .altura,
-            idLayout:
-                'TamanhosUsuarios.rotuloPrestadoresQueEsteUsuarioPodeAlternarOperar',
+            idLayout: 'TamanhosUsuarios.rotuloPrestadoresQueEsteUsuarioPodeAlternarOperar',
           ),
           Expanded(
             child: col(
@@ -618,8 +652,7 @@ void gerirPrestadores(App app, Usuario por, Usuario alvo) {
                         altura: TamanhosUsuarios
                             .rotuloNomesDocFormatarDocumentoDoc
                             .altura,
-                        idLayout:
-                            'TamanhosUsuarios.rotuloNomesDocFormatarDocumentoDoc',
+                        idLayout: 'TamanhosUsuarios.rotuloNomesDocFormatarDocumentoDoc',
                       ),
                     ),
                     BotaoIcone(
@@ -644,8 +677,7 @@ void gerirPrestadores(App app, Usuario por, Usuario alvo) {
                     altura: TamanhosUsuarios
                         .rotuloEsteUsuarioAindaNaoOperaNenhumPrestador
                         .altura,
-                    idLayout:
-                        'TamanhosUsuarios.rotuloEsteUsuarioAindaNaoOperaNenhumPrestador',
+                    idLayout: 'TamanhosUsuarios.rotuloEsteUsuarioAindaNaoOperaNenhumPrestador',
                   ),
               ],
               espaco: 8,
@@ -698,12 +730,15 @@ void gerirPrestadores(App app, Usuario por, Usuario alvo) {
 }
 
 /// Confirma e EXCLUI (apaga) o usuário — não apenas desativa.
-void _confirmarExclusao(
-  App app,
-  Usuario por,
-  Usuario alvo,
-  VoidCallback recarregar,
-) {
+void _confirmarExclusao(App app, Usuario alvo, VoidCallback recarregar) {
+  final por = app.autorizadorDaAcao('usuarios.excluir');
+  if (por == null) {
+    app.exigirPermissao(
+      'usuarios.excluir',
+      () => _confirmarExclusao(app, alvo, recarregar),
+    );
+    return;
+  }
   void remover() {
     try {
       ja<Object?>('usuarios.excluir', {
@@ -740,8 +775,7 @@ void _confirmarExclusao(
             altura: TamanhosUsuarios
                 .rotuloApagarDEFINITIVAMENTEOUsuarioAlvoLoginToUpperCaseAlvo
                 .altura,
-            idLayout:
-                'TamanhosUsuarios.rotuloApagarDEFINITIVAMENTEOUsuarioAlvoLoginToUpperCaseAlvo',
+            idLayout: 'TamanhosUsuarios.rotuloApagarDEFINITIVAMENTEOUsuarioAlvoLoginToUpperCaseAlvo',
           ),
           Tx(
             'Isso remove o usuário do sistema (não é apenas desativar) e não pode ser desfeito.',
@@ -782,12 +816,15 @@ void _confirmarExclusao(
   );
 }
 
-void _redefinirSenha(
-  App app,
-  Usuario por,
-  Usuario alvo,
-  VoidCallback recarregar,
-) {
+void _redefinirSenha(App app, Usuario alvo, VoidCallback recarregar) {
+  final por = app.autorizadorDaAcao('usuarios.senha');
+  if (por == null) {
+    app.exigirPermissao(
+      'usuarios.senha',
+      () => _redefinirSenha(app, alvo, recarregar),
+    );
+    return;
+  }
   late final Dialogo d;
   late final TextEditingController nova;
 

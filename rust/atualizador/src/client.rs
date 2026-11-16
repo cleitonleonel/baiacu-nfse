@@ -11,7 +11,7 @@ pub fn check_startup_support(helper: &Path) -> Result<()> {
         .arg("--check")
         .creation_flags(0x08000000)
         .output()?;
-    if !output.status.success() || output.stdout != b"startup-probe-v1\n" {
+    if !output.status.success() || output.stdout != b"protected-download-v2\n" {
         return Err("Atualize o componente de atualização executando o setup atual ou usando o ZIP mais recente.".into());
     }
     Ok(())
@@ -87,22 +87,46 @@ pub fn ensure(helper: &Path) -> Result<()> {
     open()?;
     Ok(())
 }
-pub fn start(version: &str, pid: u32, sha256: &str) -> Result<()> {
+pub fn start(version: &str, pid: u32, action: &str) -> Result<()> {
     crate::version(version)?;
     let service = open()?;
     if service.query_status()?.current_state != ServiceState::Stopped {
         return Err("Já existe uma atualização em andamento.".into());
     }
-    service.start(&[version, &pid.to_string(), sha256])?;
+    service.start(&[version, &pid.to_string(), action])?;
     // SCM pode responder ainda em StartPending.
     for _ in 0..100 {
         match service.query_status()?.current_state {
             ServiceState::Running => return Ok(()),
             ServiceState::Stopped => {
+                if action == "prepare" && service.query_status()?.exit_code == windows_service::service::ServiceExitCode::Win32(0) { return Ok(()); }
                 return Err("O serviço encerrou antes de preparar a atualização.".into());
             }
             _ => std::thread::sleep(Duration::from_millis(100)),
         }
     }
     Err("O serviço não iniciou no tempo esperado.".into())
+}
+
+/// Prepara sem fechar a interface. Somente o serviço escreve o status e o pacote protegido.
+pub fn prepare(root: &Path, version: &str, pid: u32, mut report: impl FnMut(&serde_json::Value)) -> Result<()> {
+    start(version, pid, "prepare")?;
+    let service = open()?;
+    let begin = std::time::Instant::now();
+    loop {
+        let state = service.query_status()?;
+        let status = std::fs::read(root.join("service/progress.json")).ok().and_then(|v| serde_json::from_slice::<serde_json::Value>(&v).ok());
+        if let Some(ref v) = status
+            && v["pid"].as_u64() == Some(pid as u64) && v["versao"].as_str() == Some(version) && v["acao"] == "prepare" { report(v); }
+        if state.current_state == ServiceState::Stopped {
+            if state.exit_code != windows_service::service::ServiceExitCode::Win32(0) {
+                return Err(std::fs::read_to_string(root.join("service/last-result.txt")).unwrap_or_else(|_| "Falha ao preparar a atualização".into()).into());
+            }
+            let v = status.ok_or("Serviço encerrou sem confirmar o pacote")?;
+            if v["pid"].as_u64() != Some(pid as u64) || v["versao"].as_str() != Some(version) || v["pronto"] != true { return Err("Pacote não foi confirmado pelo serviço".into()); }
+            return Ok(());
+        }
+        if begin.elapsed() > Duration::from_secs(600) { return Err("O serviço ainda está preparando o pacote. Aguarde antes de tentar novamente.".into()); }
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }

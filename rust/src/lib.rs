@@ -49,6 +49,7 @@ pub mod resumo_dps;
 pub mod segredos;
 pub mod texto;
 pub mod usuarios;
+pub mod permissoes;
 pub mod validacao;
 pub mod vencimento;
 pub mod xml;
