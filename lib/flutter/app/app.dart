@@ -71,14 +71,23 @@ Future<T> chamar<T>(
   void Function(Object?)? aoAvisar,
 ]) => Nucleo.chamarAcompanhando<T>(metodo, args, aoAvisar: aoAvisar);
 
-void registrar(String msg, {String nivel = 'info', String nome = 'gui'}) {
-  try {
-    Nucleo.ja<Object?>('registro.registrar', {
-      'nome': nome,
-      'nivel': nivel,
-      'msg': msg,
-    });
-  } catch (_) {}
+Future<void> _registrosPendentes = Future<void>.value();
+Future<void> registrar(
+  String msg, {
+  String nivel = 'info',
+  String nome = 'gui',
+}) {
+  return _registrosPendentes = _registrosPendentes.then((_) async {
+    try {
+      await Nucleo.chamar<Object?>('registro.registrar', {
+        'nome': nome,
+        'nivel': nivel,
+        'msg': msg,
+      });
+    } catch (e) {
+      debugPrint('Falha ao registrar evento: $e');
+    }
+  });
 }
 
 /// Rótulo do campo de busca das telas de notas (o núcleo é quem sabe por onde a busca procura).
@@ -872,6 +881,23 @@ class App {
     }
   }
 
+  int lotesPendentes = 0;
+  Future<void> atualizarLotesPendentes() async {
+    final p = prestador;
+    if (p.isEmpty || !temPermissao('lotes')) {
+      lotesPendentes = 0;
+      return;
+    }
+    try {
+      final lista = await chamar<List>('lotes.execucoes', {'prestador': p});
+      if (!viva || prestador != p) return;
+      lotesPendentes = lista.where((e) => (e['pendentes'] as int) > 0).length;
+      tiqueCasca.value++;
+    } catch (e) {
+      debugPrint('Não foi possível atualizar pendências dos lotes: $e');
+    }
+  }
+
   bool get ocupado => trabalhos > 0 || decisaoObrigatoria;
 
   void pararTimers({bool encerrarRede = true}) {
@@ -892,9 +918,9 @@ class App {
     _timers.clear();
   }
 
-  void sair() {
-    // A MESMA trava de fechar a janela: com um trabalho em segundo plano ou uma decisão de
-    // transmissão pendente, sair deixaria o resultado cair numa tela que não existe mais.
+  bool _saindo = false;
+  Future<void> sair() async {
+    if (_saindo) return;
     if (ocupado) {
       toast(
         'Conclua a operação ou a decisão de transmissão pendente antes de sair.',
@@ -902,15 +928,46 @@ class App {
       );
       return;
     }
-    registrar('Logout do usuário ${usuario.login}');
-    ja<Object?>('registro.definir_usuario', {});
+    _saindo = true;
+    trabalhos++;
     pararTimers(encerrarRede: false);
-    unawaited(chamar<Object?>('correio.encerrar_smtp', {'aguardar': false}));
-    Timer(const Duration(milliseconds: 50), () {
+    try {
+      try {
+        await _registrosPendentes.timeout(const Duration(seconds: 1));
+        await chamar<Object?>('registro.registrar', {
+          'nome': 'gui',
+          'nivel': 'info',
+          'msg': 'Logout do usuário ${usuario.login}',
+        }).timeout(const Duration(seconds: 1));
+        await chamar<Object?>(
+          'registro.definir_usuario',
+          {},
+        ).timeout(const Duration(seconds: 1));
+        await chamar<Object?>('correio.encerrar_smtp', {
+          'aguardar': false,
+        }).timeout(const Duration(seconds: 1));
+      } catch (e) {
+        debugPrint('Falha na preparação do logout: $e');
+      }
+      await chamar<Object?>(
+        'banco.trancar',
+      ).timeout(const Duration(seconds: 3));
       encerrar();
-      ja<Object?>('banco.trancar');
       aoSair();
-    });
+    } catch (e) {
+      // O serviço pode estar sem resposta: este aviso não faz outra chamada síncrona a ele.
+      debugPrint('Falha ao concluir logout: $e');
+      final aviso = Aviso(
+        'Não foi possível concluir a saída do usuário. Tente novamente ou feche o programa.',
+        erro: true,
+      );
+      avisos.add(aviso);
+      _redesenharAvisos();
+      _agendarSumico(aviso, true);
+    } finally {
+      trabalhos--;
+      _saindo = false;
+    }
   }
 
   /// Arrumação de quem vai fechar o processo: o SMTP é solto, o dados.key sai igual à cópia
@@ -925,20 +982,25 @@ class App {
     }
     _arrumado = true;
     try {
+      await _registrosPendentes;
+    } catch (_) {}
+    try {
       await chamar<Object?>('correio.encerrar_smtp', {'aguardar': false});
     } catch (_) {}
     try {
-      if (ja<bool>('banco.destrancado')) {
+      if (await chamar<bool>('banco.destrancado')) {
         await chamar<Object?>('chaves.conferir', {'motivo': 'fechamento'});
       }
     } catch (e) {
-      registrar(
-        'Falha ao conferir o dados.key no fechamento: $e',
-        nivel: 'error',
-        nome: 'app',
-      );
+      debugPrint('Falha ao conferir o dados.key no fechamento: $e');
     }
-    registrar('Aplicativo encerrando.', nome: 'app');
+    try {
+      await chamar<Object?>('registro.registrar', {
+        'nome': 'app',
+        'nivel': 'info',
+        'msg': 'Aplicativo encerrando.',
+      });
+    } catch (_) {}
     try {
       await chamar<Object?>('registro.sincronizar');
     } catch (_) {}
@@ -1003,15 +1065,16 @@ class App {
   /// Telas (índice de navegação): 0 Emitir, 1 Clientes, 2 Consultar, 3 Configurações,
   /// 4 Cofre. No trilho a ordem é outra — o Cofre entra no grupo de cima e Configurações é
   /// o botão de baixo, fora dos destinos.
-  static const trilhoNav = [0, 1, 2, 4];
+  static const trilhoNav = [0, 5, 1, 2, 4];
   static const modulosNavegacao = [
     'emitir',
     'clientes',
     'consultar',
     'config',
     'cofre',
+    'lotes',
   ];
-  static const navTrilho = {0: 0, 1: 1, 2: 2, 4: 3};
+  static const navTrilho = {0: 0, 5: 1, 1: 2, 2: 3, 4: 4};
 
   void irPara(int indice) {
     final chave = modulosNavegacao[indice];
@@ -1069,7 +1132,8 @@ class App {
               altura: TamanhosDialogos
                   .rotuloAsTelasEmissaoClientesConsultasPassamAMostrar
                   .altura,
-              idLayout: 'TamanhosDialogos.rotuloAsTelasEmissaoClientesConsultasPassamAMostrar',
+              idLayout:
+                  'TamanhosDialogos.rotuloAsTelasEmissaoClientesConsultasPassamAMostrar',
             ),
           ],
           justa: true,
@@ -1129,6 +1193,8 @@ class App {
     ambiente = prestador.isEmpty
         ? ambProducao
         : ja<String>('cadastro.get_ambiente', {'prestador': prestador});
+    lotesPendentes = 0;
+    unawaited(atualizarLotesPendentes());
     // Zera TODO estado preso ao prestador anterior.
     emailCfg = null; // config de e-mail é POR prestador
     for (final f in List.of(aoTrocarPrestador)) {

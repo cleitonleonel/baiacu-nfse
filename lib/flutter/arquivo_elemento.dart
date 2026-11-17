@@ -66,6 +66,18 @@ class IndiceFontes {
       base = int.tryParse(parte) == null ? parte : base.split('.item.').first;
     }
     if (base.isEmpty) return null;
+    // Colunas e células repetidas têm um ID por campo/coluna gerado em tempo de execução.
+    // Localiza a declaração do prefixo no código para permitir abrir sua origem no desenvolver.
+    if (!_compactas!.values.any((texto) => texto.contains(base))) {
+      var prefixo = base;
+      while (prefixo.split('.').length > 2) {
+        prefixo = prefixo.substring(0, prefixo.lastIndexOf('.'));
+        if (_compactas!.values.any((texto) => texto.contains('$prefixo.'))) {
+          base = '$prefixo.';
+          break;
+        }
+      }
+    }
     final candidatos = _fontes!.entries
         .where((e) => _compactas![e.key]!.contains(base))
         .toList();

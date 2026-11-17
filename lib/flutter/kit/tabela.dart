@@ -60,6 +60,9 @@ class TabelaCabecalhoFixo extends StatelessWidget {
     required this.larguras,
     this.colunaExpansivel = 1,
     this.espacoAntesAcoes = 0,
+    this.colunasLayout,
+    this.largurasMinimas = const {},
+    this.controleVertical,
   });
   final int quantidade;
   final double alturaLinha, alturaCabecalho;
@@ -68,6 +71,9 @@ class TabelaCabecalhoFixo extends StatelessWidget {
   final List<double> larguras;
   final int colunaExpansivel;
   final double espacoAntesAcoes;
+  final List<String>? colunasLayout;
+  final Map<int, double> largurasMinimas;
+  final ControleRolagemPorLinhas? controleVertical;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -124,17 +130,28 @@ class TabelaCabecalhoFixo extends StatelessWidget {
         );
         medida.dispose();
       }
+      for (final e in largurasMinimas.entries) {
+        minimas[e.key] = math.max(minimas[e.key], e.value);
+      }
+      final ajustadas = [
+        for (var i = 0; i < larguras.length; i++)
+          ajusteLayout(context, colunasLayout?[i]).largura,
+      ];
       final medidas = [
         for (var i = 0; i < larguras.length; i++)
           math.max(
             minimas[i],
-            larguras[i] + 14 + (i == 0 || i == larguras.length - 1 ? 17 : 0),
+            ajustadas[i] ??
+                (larguras[i] +
+                    14 +
+                    (i == 0 || i == larguras.length - 1 ? 17 : 0)),
           ),
       ];
       minimas[minimas.length - 1] += espacoAntesAcoes;
       medidas[medidas.length - 1] += espacoAntesAcoes;
       final totalInicial = medidas.fold(0.0, (a, b) => a + b);
-      if (totalInicial > limites.maxWidth) {
+      final expansivel = ajustadas[colunaExpansivel] == null;
+      if (expansivel && totalInicial > limites.maxWidth) {
         medidas[colunaExpansivel] -= math.min(
           totalInicial - limites.maxWidth,
           math.max(
@@ -145,8 +162,31 @@ class TabelaCabecalhoFixo extends StatelessWidget {
         );
       }
       final minimo = medidas.fold(0.0, (a, b) => a + b);
-      final largura = math.max(minimo, limites.maxWidth);
+      final largura = expansivel ? math.max(minimo, limites.maxWidth) : minimo;
       medidas[colunaExpansivel] += largura - minimo;
+      Widget rotulo(DataColumn coluna, int i) {
+        final id = colunasLayout?[i];
+        final label = coluna.label;
+        if (id == null || label is! Tx) return label;
+        return alvoLarguraLayout(
+          context,
+          SizedBox(
+            width: double.infinity,
+            height: alturaCabecalho,
+            child: Align(
+              alignment:
+                  ajusteLayout(context, label.idLayout).alinhamentoBotao ??
+                  AlignmentDirectional.centerStart,
+              child: label,
+            ),
+          ),
+          id: id,
+          nome: 'Coluna ${label.valor}',
+          largura: medidas[i],
+          minima: minimas[i],
+        );
+      }
+
       DataTable parte(DataTable tabela, bool cabecalho) => TabelaPadrao(
         esconderSeparadorInicial: !cabecalho,
         headingRowHeight: cabecalho ? alturaCabecalho : 0,
@@ -167,7 +207,7 @@ class TabelaCabecalhoFixo extends StatelessWidget {
                               ? espacoAntesAcoes
                               : 0,
                         ),
-                        child: tabela.columns[i].label,
+                        child: rotulo(tabela.columns[i], i),
                       ),
                     )
                   : const SizedBox.shrink(),
@@ -189,6 +229,7 @@ class TabelaCabecalhoFixo extends StatelessWidget {
                     mouseCursor: row.mouseCursor,
                     onSelectChanged: row.onSelectChanged,
                     onLongPress: row.onLongPress,
+                    onHover: row.onHover,
                     cells: [
                       for (var i = 0; i < row.cells.length; i++)
                         i != row.cells.length - 1 || espacoAntesAcoes == 0
@@ -225,11 +266,12 @@ class TabelaCabecalhoFixo extends StatelessWidget {
               Expanded(
                 child: RolagemPorLinhas(
                   alturaLinha: alturaLinha,
+                  controle: controleVertical,
                   child: TabelaPreguicosa(
                     quantidade: quantidade,
                     alturaLinha: alturaLinha,
                     alturaCabecalho: 0,
-                    entradas: [...entradas, largura],
+                    entradas: [...entradas, largura, ...medidas],
                     montar: (a, b, chave) => parte(montar(a, b, chave), false),
                   ),
                 ),
@@ -310,11 +352,12 @@ class CelulasProntas {
 // --------------------------------------------------------------------------- //
 /// Monta a tabela com as linhas de [primeira] a [ultima] (inclusive; vazia se ultima <
 /// primeira). Cada linha leva a chave que [chave] dá ao índice dela.
-typedef MontarTabela = DataTable Function(
-  int primeira,
-  int ultima,
-  LocalKey Function(int indice) chave,
-);
+typedef MontarTabela =
+    DataTable Function(
+      int primeira,
+      int ultima,
+      LocalKey Function(int indice) chave,
+    );
 
 /// A `DataTable` de uma tela de lista (dentro da rolagem vertical da tela), montada só na
 /// faixa de linhas que está à vista — mais uma sobra em cima e embaixo. O que fica de fora

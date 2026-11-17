@@ -104,6 +104,18 @@ class _EmissorAppState extends State<EmissorApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _janela.setMethodCallHandler((chamada) async {
+      if (chamada.method == 'fecharParaInstalar') {
+        if (_avaliandoSaida || _saidaBloqueada()) return;
+        _avaliandoSaida = true;
+        final app = _app;
+        if (app != null && app.viva) app.pararTimers(encerrarRede: false);
+        await App.arrumarParaFechar().timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {},
+        );
+        await ServicesBinding.instance.exitApplication(AppExitType.required);
+        return;
+      }
       if (chamada.method == 'sairDaBandeja' &&
           await _pedirSaida(daBandeja: true) == AppExitResponse.exit) {
         await ServicesBinding.instance.exitApplication(AppExitType.required);

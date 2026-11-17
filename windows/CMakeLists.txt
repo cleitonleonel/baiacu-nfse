@@ -111,6 +111,8 @@ add_custom_target(nucleo_rust ALL
 add_dependencies(${BINARY_NAME} nucleo_rust)
 install(FILES "${NUCLEO_TARGET_DIR}/release/baiacu-atualizador.exe"
   DESTINATION "${CMAKE_INSTALL_PREFIX}/service" COMPONENT Runtime)
+install(FILES "${NUCLEO_TARGET_DIR}/release/baiacu-dados.exe"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
 install(FILES "${NUCLEO_TARGET_DIR}/release/nucleo.dll"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
 install(FILES "${NUCLEO_DIR}/recursos/danfse/LICENSE" "${NUCLEO_DIR}/recursos/danfse/LICENSE-QR" "${NUCLEO_DIR}/recursos/danfse/ORIGEM.md"

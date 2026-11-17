@@ -2196,13 +2196,6 @@ abstract final class TamanhosConsultar {
     altura: null,
     id: 'TamanhosConsultar.botaoAbrirDANFSePDF',
   );
-
-  /// Atualizar a lista
-  static const botaoAtualizarALista = Tamanho(
-    largura: null,
-    altura: null,
-    id: 'TamanhosConsultar.botaoAtualizarALista',
-  );
 }
 
 /// Emitir NFS-e.

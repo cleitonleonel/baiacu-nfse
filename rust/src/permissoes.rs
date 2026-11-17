@@ -61,6 +61,11 @@ pub(crate) fn definir_sessao(operador: Option<&usuarios::Usuario>) -> Res<()> {
     Ok(())
 }
 
+#[cfg(windows)]
+pub(crate) fn sessao_autenticada() -> bool {
+    sessao().is_ok_and(|sessao| sessao.as_ref().is_some_and(|s| usuario_atual(&s.operador).is_ok()))
+}
+
 pub fn limpar_autorizacoes() {
     if let Ok(mut sessao) = sessao() {
         if let Some(sessao) = sessao.as_mut() {
@@ -111,7 +116,9 @@ pub fn validar(v: &Value) -> Res<BTreeMap<String, i64>> {
             continue;
         }
         // Os perfis exportados antes da aba Geral ainda usam o mesmo formato.
-        if regra.id == "config.geral" {
+        if matches!(regra.id.as_str(), "config.geral" | "config.emissao" | "lotes")
+            || regra.id.starts_with("lotes.")
+        {
             result.insert(regra.id.clone(), regra.padrao);
         } else {
             return Err(Erro::valor(

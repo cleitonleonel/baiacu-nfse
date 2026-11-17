@@ -89,6 +89,7 @@ String mascaraLogin(String t) {
 
 enum _Tela {
   carregando,
+  erroDePartida,
   primeiroAcesso,
   recuperarChaves,
   login,
@@ -110,6 +111,7 @@ class TelaAcesso extends StatefulWidget {
 class _TelaAcessoState extends State<TelaAcesso> {
   _Tela _tela = _Tela.carregando;
   // Primeiro acesso concluído: a senha mestra recém-gerada e o master criado.
+  String _erroDePartida = '';
   String _senhaMestra = '';
   Usuario? _novoMaster;
   Widget? _cartaoDeTras;
@@ -121,18 +123,28 @@ class _TelaAcessoState extends State<TelaAcesso> {
   }
 
   Future<void> _decidir() async {
-    final estado = await Nucleo.chamar<String>('banco.estado');
-    _Tela tela;
-    if (estado == 'novo') {
-      tela = _Tela.primeiroAcesso;
-    } else if (!await Nucleo.chamar<bool>('banco.destrancado') &&
-        !await Nucleo.chamar<bool>('chaves.arquivo_integro')) {
-      tela = _Tela.recuperarChaves;
-    } else {
-      tela = _Tela.login;
+    try {
+      final estado = await Nucleo.chamar<String>('banco.estado');
+      _Tela tela;
+      if (estado == 'novo') {
+        tela = _Tela.primeiroAcesso;
+      } else if (!await Nucleo.chamar<bool>('banco.destrancado') &&
+          !await Nucleo.chamar<bool>('chaves.arquivo_integro')) {
+        tela = _Tela.recuperarChaves;
+      } else {
+        tela = _Tela.login;
+      }
+      if (!mounted) return;
+      setState(() => _tela = tela);
+    } on ErroNucleo catch (erro) {
+      if (widget.aoPreparar != null) rethrow;
+      if (!mounted) return;
+      setState(() {
+        _erroDePartida = erro.msg;
+        _tela = _Tela.erroDePartida;
+      });
+      return;
     }
-    if (!mounted) return;
-    setState(() => _tela = tela);
     final confirmar = widget.aoPreparar;
     if (confirmar != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -147,6 +159,23 @@ class _TelaAcessoState extends State<TelaAcesso> {
   Widget build(BuildContext context) {
     final Widget conteudo = switch (_tela) {
       _Tela.carregando => const SizedBox.shrink(),
+      _Tela.erroDePartida => _centro(
+        _cartao(
+          largura: 500,
+          espaco: 16,
+          itens: [
+            texto('Não foi possível iniciar o Baiacu', tamanho: Letra.titulo),
+            texto(_erroDePartida),
+            FilledButton(
+              onPressed: () {
+                _ir(_Tela.carregando);
+                _decidir();
+              },
+              child: const Text('Tentar novamente'),
+            ),
+          ],
+        ),
+      ),
       _Tela.login => _Login(
         aoEntrar: widget.aoEntrar,
         aoRedefinir: () => _ir(_Tela.redefinirMaster),
@@ -260,21 +289,23 @@ class _MarcaBaiacu extends StatelessWidget {
     // fio mais claro na base dos espinhos); as camadas só durante a animação.
     return AnimatedBuilder(
       animation: t,
-      builder: (context, _) => t.value == 0 ? inteiro : Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Transform.scale(
-            scale: 1 + 0.05 * t.value,
-            alignment: _centroCorpo,
-            child: corpo,
-          ),
-          Transform.scale(
-            scale: 1 + 0.17 * t.value,
-            alignment: _centroCorpo,
-            child: pontas,
-          ),
-        ],
-      ),
+      builder: (context, _) => t.value == 0
+          ? inteiro
+          : Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Transform.scale(
+                  scale: 1 + 0.05 * t.value,
+                  alignment: _centroCorpo,
+                  child: corpo,
+                ),
+                Transform.scale(
+                  scale: 1 + 0.17 * t.value,
+                  alignment: _centroCorpo,
+                  child: pontas,
+                ),
+              ],
+            ),
     );
   }
 }
@@ -287,7 +318,10 @@ Widget _tituloMarca(BuildContext context) => Text.rich(
         text: 'Baiacu ',
         style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
       ),
-      const TextSpan(text: 'NFS-e', style: TextStyle(color: _corLaranja)),
+      const TextSpan(
+        text: 'NFS-e',
+        style: TextStyle(color: _corLaranja),
+      ),
     ],
   ),
   style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
@@ -350,12 +384,18 @@ class _LoginState extends State<_Login> with SingleTickerProviderStateMixin {
   );
   late final Animation<double> _espinhos = TweenSequence<double>([
     TweenSequenceItem(
-      tween: Tween(begin: 0.0, end: 1.0).chain(CurveTween(curve: Curves.easeOutBack)),
+      tween: Tween(
+        begin: 0.0,
+        end: 1.0,
+      ).chain(CurveTween(curve: Curves.easeOutBack)),
       weight: 40,
     ),
     TweenSequenceItem(tween: ConstantTween(1.0), weight: 10),
     TweenSequenceItem(
-      tween: Tween(begin: 1.0, end: 0.0).chain(CurveTween(curve: Curves.easeInOutCubic)),
+      tween: Tween(
+        begin: 1.0,
+        end: 0.0,
+      ).chain(CurveTween(curve: Curves.easeInOutCubic)),
       weight: 50,
     ),
   ]).animate(_baiacu);
@@ -378,7 +418,10 @@ class _LoginState extends State<_Login> with SingleTickerProviderStateMixin {
     super.didChangeDependencies();
     // As duas camadas já carregadas: a troca do desenho não pisca na hora da animação.
     precacheImage(const AssetImage('assets/images/puffer_corpo.png'), context);
-    precacheImage(const AssetImage('assets/images/puffer_espinhos.png'), context);
+    precacheImage(
+      const AssetImage('assets/images/puffer_espinhos.png'),
+      context,
+    );
   }
 
   /// Os espinhos saem e voltam. Pula se a animação foi desligada em Configurações ›
@@ -876,15 +919,13 @@ class _PrimeiroAcessoState extends State<_PrimeiroAcesso> {
     if (_criando) return;
     _criando = true;
     try {
-      var msg = await Nucleo.chamar<String>(
-        'usuarios.validar_credenciais_novas',
-        {
-          'login': _login.text,
-          'senha': _senha.text,
-          'confirma': _confirma.text,
-          'nome': _nome.text,
-        },
-      );
+      var msg =
+          await Nucleo.chamar<String>('usuarios.validar_credenciais_novas', {
+            'login': _login.text,
+            'senha': _senha.text,
+            'confirma': _confirma.text,
+            'nome': _nome.text,
+          });
       if (msg.isEmpty && _nome.text.trim().isEmpty) {
         msg = 'Informe o nome do usuário.';
       }
@@ -964,6 +1005,7 @@ class _PrimeiroAcessoState extends State<_PrimeiroAcesso> {
           largura: TamanhosAcesso.campoSeuNome.largura,
           focoInicial: !desabilitado,
           maximo: nomeMax,
+          mascara: (s) => s.toUpperCase(),
           desabilitado: desabilitado,
           altura: TamanhosAcesso.campoSeuNome.altura,
           idLayout: 'TamanhosAcesso.campoSeuNome',
@@ -1004,7 +1046,9 @@ class _PrimeiroAcessoState extends State<_PrimeiroAcesso> {
           icone: Icons.person_add,
           aoApertar: desabilitado ? null : _criar,
           largura: TamanhosAcesso.botaoGeral3.largura,
-          altura: TamanhosAcesso.botaoGeral3.altura,
+          altura:
+              ajusteLayout(context, TamanhosAcesso.botaoGeral.id).altura ??
+              TamanhosAcesso.botaoGeral.altura,
           idLayout: 'TamanhosAcesso.botaoGeral3',
         ),
       ],

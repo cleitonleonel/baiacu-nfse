@@ -18,6 +18,7 @@ import '../kit/formatos.dart';
 import '../kit/menu_suspenso.dart' show aquecerMenuSuspenso;
 import '../tema.dart';
 import 'previa_emissao.dart';
+import 'periodo.dart' show abrirCompetencia, dataBr, dataIso;
 import 'cliente_form.dart' show abrirCliente;
 
 /// Chave da opção "Todos"/"Todas" das listas de filtro.
@@ -239,6 +240,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
 
   final xDesc = TextEditingController();
   final vServ = TextEditingController();
+  final dataCompetencia = TextEditingController(text: dataBr(DateTime.now()));
   // Descontos da nota (R$), informados a cada emissão como o valor. O incondicionado reduz as
   // bases de cálculo; o condicionado, só o valor líquido.
   final vDescInc = TextEditingController();
@@ -255,6 +257,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
   late final ddRet = _trib(retOpcoes);
   late final ddIss = _trib(issOpcoes);
   late final ddRetIss = _trib(retIssOpcoes);
+  bool rtcPlataformaDigital = false;
   final rtcIndDest = Suspensa(
     opcoes: const [Opcao('0', 'Sim'), Opcao('1', 'Não')],
   );
@@ -921,7 +924,20 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
     _salvarTributos();
   }
 
-  String? get _competencia => _imutavel('dCompet');
+  String? get _competencia =>
+      _imutavel('dCompet') ??
+      (dataCompetencia.text.trim().isEmpty
+          ? null
+          : dataIso(lerDataDoCampo(dataCompetencia.text)));
+
+  void _escolherCompetencia() {
+    final inicial = lerDataDoCampo(dataCompetencia.text) ?? DateTime.now();
+    abrirCompetencia(
+      app,
+      inicial,
+      (escolha, _) => dataCompetencia.text = dataBr(escolha),
+    );
+  }
 
   List<String> _validar(Map<String, dynamic> form) {
     final exigeRtc = ja<bool>('cadastro.rtc_required', {
@@ -1131,6 +1147,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
       ddRet.por(retOpcoes.first.$1);
       ddIss.por(issOpcoes.first.$1);
       ddRetIss.por(retIssOpcoes.first.$1);
+      rtcPlataformaDigital = false;
       rtcIndDest.por(null);
       rtcIndOp.por(null);
       rtcCst.por(null);
@@ -1174,6 +1191,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
     ddRet.por(s('tpRetPisCofins'));
     ddIss.por(s('tribISSQN'));
     ddRetIss.por(s('tpRetISSQN'));
+    rtcPlataformaDigital = f['rtc_plataforma_digital'] == true;
     rtcIndDest.por(s('rtc_indDest'));
     rtcIndOp.por(s('rtc_cIndOp'));
     rtcCst.por(s('rtc_CST'));
@@ -1491,6 +1509,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
 
   final _camposIniciais = <TextEditingController, String>{};
   List<TextEditingController> get _camposRascunho => [
+    dataCompetencia,
     xDesc,
     vServ,
     vDescInc,
@@ -1554,6 +1573,9 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
   }
 
   void limparFormulario() {
+    final hoje = dataBr(DateTime.now());
+    _camposIniciais[dataCompetencia] = hoje;
+    if (dataCompetencia.text != hoje) dataCompetencia.text = hoje;
     servico = null;
     tomador = null;
     slug = null;
@@ -1606,6 +1628,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
     f['cTribMun'] = cTribMun.text;
     f['tribISSQN'] = ddIss.valor ?? '';
     f['tpRetISSQN'] = ddRetIss.valor ?? '';
+    f['rtc_plataforma_digital'] = rtcPlataformaDigital;
     f['rtc_indDest'] = rtcIndDest.valor ?? '';
     f['rtc_cIndOp'] = rtcIndOp.valor ?? '';
     f['rtc_CST'] = rtcCst.valor ?? '';
@@ -1648,7 +1671,20 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
 
   List<Object?>? _extraSubst([Map<String, dynamic>? s]) {
     final sub = s ?? subst;
-    if (sub == null) return null;
+    if (sub == null) {
+      if (dataCompetencia.text.trim().isEmpty) return null;
+      final data = lerDataDoCampo(dataCompetencia.text);
+      final hoje = DateTime.now();
+      if (data == null ||
+          data.isAfter(DateTime(hoje.year, hoje.month, hoje.day))) {
+        throw const FormatException(
+          'Informe uma competência válida, até a data de hoje.',
+        );
+      }
+      return [
+        ['dps', 'dCompet', dataIso(data)],
+      ];
+    }
     return ja<List>('emissao.subst_overrides', {
       'chave': sub['chave'],
       'c_motivo': sub['cMotivo'],
@@ -1904,7 +1940,8 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
                 altura: TamanhosEmitir
                     .rotuloDescontoIncondicionadoDecimalBrlFormVDescIncondAsString
                     .altura,
-                idLayout: 'TamanhosEmitir.rotuloDescontoIncondicionadoDecimalBrlFormVDescIncondAsString',
+                idLayout:
+                    'TamanhosEmitir.rotuloDescontoIncondicionadoDecimalBrlFormVDescIncondAsString',
               ),
             if (Dec.ouZero(form['vDescCond'] as String).positivo)
               Tx(
@@ -1915,7 +1952,8 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
                 altura: TamanhosEmitir
                     .rotuloDescontoCondicionadoDecimalBrlFormVDescCondAsString
                     .altura,
-                idLayout: 'TamanhosEmitir.rotuloDescontoCondicionadoDecimalBrlFormVDescCondAsString',
+                idLayout:
+                    'TamanhosEmitir.rotuloDescontoCondicionadoDecimalBrlFormVDescCondAsString',
               ),
             Tx(
               'Esta ação transmite a DPS à SEFIN e não pode ser desfeita.'
@@ -1947,7 +1985,8 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
             altura: TamanhosEmitir
                 .botaoProducaoConfirmarEEmitirConfirmarEEmitirAmb
                 .altura,
-            idLayout: 'TamanhosEmitir.botaoProducaoConfirmarEEmitirConfirmarEEmitirAmb',
+            idLayout:
+                'TamanhosEmitir.botaoProducaoConfirmarEEmitirConfirmarEEmitirAmb',
           ),
         ],
         // Fechar por Cancelar, Esc ou "X" destrava o botão Emitir do mesmo jeito.
@@ -2540,7 +2579,8 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
                       altura: TamanhosEmitir
                           .rotuloEMailAutomaticoNaoFoiEnviadoEmailError
                           .altura,
-                      idLayout: 'TamanhosEmitir.rotuloEMailAutomaticoNaoFoiEnviadoEmailError',
+                      idLayout:
+                          'TamanhosEmitir.rotuloEMailAutomaticoNaoFoiEnviadoEmailError',
                     ),
           ],
           justa: true,
@@ -2842,6 +2882,16 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
               ),
               divisor(),
               _secao('IBS/CBS'),
+              Marcar(
+                valor: rtcPlataformaDigital,
+                rotulo:
+                    'Operação abrangida pelo art. 22 da LC 214/2025 (plataforma digital)',
+                desabilitado: t,
+                aoMudar: (v) {
+                  rtcPlataformaDigital = v ?? false;
+                  _atualizar();
+                },
+              ),
               lin(
                 [
                   _listaC(
@@ -3151,7 +3201,8 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
                 altura: TamanhosTributosEmissao
                     .rotuloEnderecoEIdentificacaoDoClienteSaoEditadosNa
                     .altura,
-                idLayout: 'TamanhosTributosEmissao.rotuloEnderecoEIdentificacaoDoClienteSaoEditadosNa',
+                idLayout:
+                    'TamanhosTributosEmissao.rotuloEnderecoEIdentificacaoDoClienteSaoEditadosNa',
               ),
             ],
             espaco: Medida.espacoEntreCampos,
@@ -3165,6 +3216,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
 
   @override
   Widget build(BuildContext context) {
+    final competenciaDesabilitada = _emitindo || _travaUi || app.ocupado;
     final dados = Ct(
       padding: const EdgeInsets.fromLTRB(0, 6, 0, 0),
       child: col(
@@ -3177,6 +3229,29 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
             altura: TamanhosEmitir.rotuloDadosDaEmissao.altura,
             idLayout: 'TamanhosEmitir.rotuloDadosDaEmissao',
           ),
+          if (subst == null)
+            CampoTexto(
+              controle: dataCompetencia,
+              rotulo: 'Data de competência',
+              dicaRotulo: false,
+              largura: 210,
+              somenteLeitura: true,
+              sufixo: BotaoIcone(
+                Icons.calendar_month_outlined,
+                aoClicar: _escolherCompetencia,
+                desabilitado: competenciaDesabilitada,
+              ),
+              aoTocar: _escolherCompetencia,
+              aoEnviar: (_) => _escolherCompetencia(),
+              desabilitado: competenciaDesabilitada,
+              idLayout: 'Emitir.competencia',
+            )
+          else
+            Tx(
+              'Competência da nota original: '
+              '${dataIsoParaBr(_imutavel('dCompet') ?? '')}',
+              idLayout: 'Emitir.competenciaOriginal',
+            ),
           lin([
             Expanded(
               child: CampoTexto(
@@ -3261,7 +3336,8 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
               child: Marcar(
                 idLayout: 'Checkbox.emitir.2',
                 valor: cbRetAbate,
-                rotulo: 'Retenções (IRRF e CSLL/PIS/COFINS) calculadas sobre o valor já com o desconto incondicionado',
+                rotulo:
+                    'Retenções (IRRF e CSLL/PIS/COFINS) calculadas sobre o valor já com o desconto incondicionado',
                 dica:
                     'Marcado: a retenção sai do que vai ser pago (Lei 10.833/2003, art. 31), sem o desconto. '
                     'Desmarque se o seu cliente retém sobre o valor cheio do serviço. '
@@ -3392,8 +3468,9 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
           // continua o de sempre).
           Theme(
             data: Theme.of(context).copyWith(
-              checkboxTheme: Theme.of(context).checkboxTheme
-                  .copyWith(visualDensity: const VisualDensity(vertical: -4)),
+              checkboxTheme: Theme.of(context).checkboxTheme.copyWith(
+                visualDensity: const VisualDensity(vertical: -4),
+              ),
             ),
             child: Ct(
               padding: const EdgeInsets.symmetric(vertical: 4),
@@ -3448,7 +3525,8 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
                   altura: TamanhosEmitir
                       .botaoTribTravadoEditarTributosSalvarTributos
                       .altura,
-                  idLayout: 'TamanhosEmitir.botaoTribTravadoEditarTributosSalvarTributos',
+                  idLayout:
+                      'TamanhosEmitir.botaoTribTravadoEditarTributosSalvarTributos',
                 ),
             ],
             espaco: 12,

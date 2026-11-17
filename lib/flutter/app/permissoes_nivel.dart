@@ -90,6 +90,7 @@ void abrirPermissoesNivel(App app) {
   var resultados = todos;
   var modulosVisiveis = [for (final modulo in todos.keys) (modulo, 0)];
   var selecionado = todos.keys.firstOrNull;
+  String? linhaSobMouse;
   final aoVivo = BuscaAoVivo();
   var consultaAtual = '';
   late final TextEditingController busca;
@@ -231,20 +232,25 @@ void abrirPermissoesNivel(App app) {
       return DataRow(
         key: chave,
         selected: ativa,
-        color: ativa
-            ? corLinha(cores.secondaryContainer, cores.primaryContainer)
-            // InkHighlight anima o alfa separadamente. Trocar o realce opaco
-            // por Colors.transparent (RGB preto) deixa uma faixa preta no fade.
-            : corLinha(
-                cores.surfaceContainerHigh,
-                cores.surfaceContainerHighest,
-              ),
+        color: WidgetStatePropertyAll(
+          linhaSobMouse == regra.id
+              ? hoverPadrao.resolve({WidgetState.hovered})
+              : ativa
+              ? cores.secondaryContainer
+              : null,
+        ),
         mouseCursor: WidgetStatePropertyAll(
           principal && !ocupado
               ? SystemMouseCursors.click
               : SystemMouseCursors.basic,
         ),
-        // A seleção de linha habilita o realce da tabela, como em Clientes.
+        onHover: (dentro) {
+          if (!dentro && linhaSobMouse != regra.id) return;
+          final nova = dentro ? regra.id : null;
+          if (linhaSobMouse == nova) return;
+          linhaSobMouse = nova;
+          d.atualizar();
+        },
         onSelectChanged: ocupado
             ? null
             : (_) {
@@ -291,7 +297,7 @@ void abrirPermissoesNivel(App app) {
       alturaCabecalho: Medida.cabecalhoDaTabela,
       larguras: [principal ? 152 : 248, 130],
       colunaExpansivel: 0,
-      entradas: [linhas, valores, selecionado, ocupado, cores],
+      entradas: [linhas, valores, selecionado, ocupado, cores, linhaSobMouse],
       montar: (primeira, ultima, chave) => TabelaPadrao(
         columns: [
           cabecalho(principal ? 'Módulos principais' : 'Submódulos e ações'),

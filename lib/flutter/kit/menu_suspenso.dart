@@ -572,6 +572,9 @@ class _MenuSuspensoState extends State<MenuSuspenso> {
             if (widget.onEmptyAction != null && widget.controller.text.trim().isNotEmpty)
               MenuItemButton(
                 leadingIcon: const Icon(Icons.person_add_alt),
+                style: const ButtonStyle(
+                  mouseCursor: WidgetStatePropertyAll(SystemMouseCursors.click),
+                ),
                 onPressed: () { _controller.close(); widget.focusNode.unfocus(); widget.onEmptyAction!(); },
                 child: Text(widget.emptyActionLabel ?? 'Adicionar…'),
               ),

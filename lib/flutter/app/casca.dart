@@ -13,6 +13,7 @@ import '../telas/clientes.dart';
 import '../telas/config.dart';
 import '../telas/consultar.dart';
 import '../telas/emitir.dart';
+import '../telas/lotes.dart';
 import 'ajuda.dart';
 import 'app.dart';
 import 'atualizacao.dart';
@@ -60,6 +61,7 @@ class _CascaState extends State<Casca> {
         () => procurarAtualizacao(app, automatica: true),
       );
       if (app.semPrestador) return;
+      app.atualizarLotesPendentes();
       chamar<Object?>('pdf.aquecer_danfse').catchError((Object _) => null);
       chamar<Object?>('emissao.aquecer').catchError((Object _) => null);
       aquecerCatalogos(context);
@@ -133,7 +135,8 @@ class _CascaState extends State<Casca> {
                 altura: TamanhosNavegacao
                     .rotuloNenhumPrestadorLiberadoParaEsteUsuario
                     .altura,
-                idLayout: 'TamanhosNavegacao.rotuloNenhumPrestadorLiberadoParaEsteUsuario',
+                idLayout:
+                    'TamanhosNavegacao.rotuloNenhumPrestadorLiberadoParaEsteUsuario',
               ),
               Tx(
                 app.temPermissao('usuarios.prestadores')
@@ -271,6 +274,7 @@ class _Telas extends StatelessWidget {
       TelaConsultar(app: app),
       TelaConfig(app: app),
       TelaCofre(app: app),
+      TelaLotes(app: app),
     ];
     return ValueListenableBuilder<int>(
       valueListenable: app.tiqueCasca,
@@ -426,6 +430,7 @@ class _TrilhoState extends State<_Trilho> {
     builder: (context, _, _) {
       const destinos = [
         (Icons.receipt_long_outlined, Icons.receipt_long, 'Emitir'),
+        (Icons.library_books_outlined, Icons.library_books, 'Emitir em Lote'),
         (Icons.people_outline, Icons.people, 'Clientes'),
         (Icons.search, Icons.manage_search, 'Consultar'),
         (Icons.lock_outlined, Icons.lock, 'Cofre'),
@@ -458,9 +463,28 @@ class _TrilhoState extends State<_Trilho> {
                 for (final (icone, iconeSel, rotulo) in destinos)
                   NavigationRailDestination(
                     disabled: parado,
-                    icon: Icon(icone),
-                    selectedIcon: Icon(iconeSel),
-                    label: Text(rotulo),
+                    icon: rotulo == 'Emitir em Lote' && app.lotesPendentes > 0
+                        ? Badge(
+                            label: const Text('1'),
+                            backgroundColor: Colors.orange,
+                            child: Icon(icone, color: Colors.orange),
+                          )
+                        : Icon(icone),
+                    selectedIcon:
+                        rotulo == 'Emitir em Lote' && app.lotesPendentes > 0
+                        ? Badge(
+                            label: const Text('1'),
+                            backgroundColor: Colors.orange,
+                            child: Icon(iconeSel, color: Colors.orange),
+                          )
+                        : Icon(iconeSel),
+                    label: Text(
+                      rotulo,
+                      style:
+                          rotulo == 'Emitir em Lote' && app.lotesPendentes > 0
+                          ? const TextStyle(color: Colors.orange)
+                          : null,
+                    ),
                   ),
               ],
             ),

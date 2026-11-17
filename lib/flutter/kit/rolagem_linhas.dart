@@ -6,15 +6,17 @@ class RolagemPorLinhas extends StatefulWidget {
     super.key,
     required this.alturaLinha,
     required this.child,
+    this.controle,
   });
   final double alturaLinha;
   final Widget child;
+  final ControleRolagemPorLinhas? controle;
   @override
   State<RolagemPorLinhas> createState() => _RolagemPorLinhasState();
 }
 
 class _RolagemPorLinhasState extends State<RolagemPorLinhas> {
-  late final _controle = _ControleLinhas(widget.alturaLinha);
+  late final _controle = ControleRolagemPorLinhas(widget.alturaLinha);
   @override
   void dispose() {
     _controle.dispose();
@@ -32,7 +34,7 @@ class _RolagemPorLinhasState extends State<RolagemPorLinhas> {
           width: limites.maxWidth,
           height: inteira > 0 ? inteira : limites.maxHeight,
           child: SingleChildScrollView(
-            controller: _controle,
+            controller: widget.controle ?? _controle,
             physics: _FisicaLinhas(widget.alturaLinha),
             child: widget.child,
           ),
@@ -42,8 +44,8 @@ class _RolagemPorLinhasState extends State<RolagemPorLinhas> {
   );
 }
 
-class _ControleLinhas extends ScrollController {
-  _ControleLinhas(this.linha);
+class ControleRolagemPorLinhas extends ScrollController {
+  ControleRolagemPorLinhas(this.linha, {super.keepScrollOffset});
   final double linha;
   @override
   ScrollPosition createScrollPosition(

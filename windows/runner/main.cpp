@@ -87,6 +87,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ShellExecuteW(nullptr, L"open", exe_path, nullptr, directory.c_str(), SW_SHOWNORMAL);
     return EXIT_SUCCESS;
   }
+  const bool installed = GetFileAttributesW((directory + L"\\installed.marker").c_str()) != INVALID_FILE_ATTRIBUTES;
+  if (installed) {
+    // Instalações anteriores precisam do setup para registrar o novo serviço.
+    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    SC_HANDLE dados = scm ? OpenServiceW(scm, L"BaiacuNFSeDados", SERVICE_QUERY_STATUS) : nullptr;
+    if (dados) CloseServiceHandle(dados);
+    if (scm) CloseServiceHandle(scm);
+    if (!dados) {
+      if (!oculta) MessageBoxW(nullptr,
+          L"Execute o instalador desta versão para registrar o serviço Baiacu NFSe - Dados.",
+          L"Baiacu NFS-e", MB_OK | MB_ICONINFORMATION);
+      return EXIT_FAILURE;
+    }
+  }
   StartupGuard starting;
   if (starting.duplicate()) return EXIT_SUCCESS;
   wchar_t reabrir_env[8] = {};

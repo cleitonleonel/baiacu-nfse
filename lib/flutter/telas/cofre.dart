@@ -124,6 +124,8 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
   final _busca = TextEditingController();
   final _irPara = TextEditingController();
   final _ddTipo = Suspensa(valor: todos, opcoes: _opcoesTipo)..por(todos);
+  final _ddBasePeriodo = Suspensa(valor: 'emissao', opcoes: opcoesBasePeriodo);
+
   final _ddPeriodo = Suspensa(valor: 'tudo', opcoes: _opcoesPeriodoCofre())
     ..por('tudo');
   final _ddAmbiente = Suspensa(valor: 'todos', opcoes: opcoesDeAmbiente)
@@ -172,9 +174,15 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
 
   void _redesenhar() => redesenhar();
 
-  void _aoMudarNotas() => _carregadoPrest = null;
+  void _aoMudarNotas() {
+    _consultaAtual++;
+    _carregando = false;
+    _carregadoPrest = null;
+  }
 
   void _aoTrocarPrestador() {
+    _consultaAtual++;
+    _carregando = false;
     // busca e página são do prestador anterior; a lista recarrega ao entrar
     _busca.text = '';
     _pagina = 0;
@@ -185,13 +193,20 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
     for (final f in [_fichaSinc, _fichaAuto]) {
       if (f.isNotEmpty) {
         try {
-          ja<Object?>('nucleo.cancelar', {'ficha': f});
+          chamar<Object?>('nucleo.cancelar', {'ficha': f}).catchError((
+            Object e,
+          ) {
+            debugPrint('Falha ao cancelar: $e');
+            return null;
+          });
         } catch (_) {}
       }
     }
   }
 
   void _pararTudo() {
+    _consultaAtual++;
+    _carregando = false;
     _aoVivo.cancelar();
     _autoTimer?.cancel();
     _autoTimer = null;
@@ -207,6 +222,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
     app.aoTrocarPrestador.remove(_aoTrocarPrestador);
     app.aoMudarNotas.remove(_aoMudarNotas);
     app.aoPararTimers.remove(_pararTudo);
+    _ddBasePeriodo.dispose();
     super.dispose();
   }
 
@@ -268,28 +284,41 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
   }
 
   /// Consulta o banco de notas e mostra a página atual.
-  void carregarPagina() {
+  int _consultaAtual = 0;
+  bool _carregando = false;
+  Future<void> carregarPagina() async {
     if (!app.temPermissao('cofre.pesquisar')) return;
-    _carregadoPrest = app.prestador;
+    final consulta = ++_consultaAtual;
+    _carregando = true;
+    _redesenhar();
+    final prest = app.prestador;
+    final f = filtro();
+    final porCompetencia = _ddBasePeriodo.valor == 'competencia';
+    final porPagina = _porPagina;
+    var paginaAtual = _pagina;
+    bool atual() =>
+        mounted &&
+        app.viva &&
+        consulta == _consultaAtual &&
+        prest == app.prestador;
     var notas = <Map<String, dynamic>>[];
     var total = 0;
     var soma = 0.0;
     var erro = '';
-    if (app.prestador.isNotEmpty) {
+    var grupos = <String, String>{};
+    if (prest.isNotEmpty) {
       try {
-        _gruposClientes = {
-          for (final (doc, grupo) in jaPares('cadastro.tomadores_grupos', {
-            'prestador': app.prestador,
-          }))
-            doc: grupo,
-        };
-        final f = filtro();
-        Map<String, dynamic> listar() => jaMapa('cofre.listar', {
-          'dono': app.prestador,
+        final pares = await chamar<List>('cadastro.tomadores_grupos', {
+          'prestador': prest,
+        });
+        if (!atual()) return;
+        grupos = {for (final par in pares) par[0] as String: par[1] as String};
+        Future<Map> listar() => chamar<Map>('cofre.listar', {
+          'por_competencia': porCompetencia,
+          'dono': prest,
           'filtro': {
             'grupos': [
-              for (final item in _gruposClientes.entries)
-                [item.key, item.value],
+              for (final item in grupos.entries) [item.key, item.value],
             ],
             'papel': f.papel,
             'amb': f.amb,
@@ -298,16 +327,17 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
             'termo': f.termo,
             'situacao': f.situacao,
             'ordem': f.ordem,
-            'limite': _porPagina,
-            'offset': _pagina * _porPagina,
+            'limite': porPagina,
+            'offset': paginaAtual * porPagina,
           },
         });
-        var r = listar();
+        var r = await listar();
+        if (!atual()) return;
         total = (r['total'] as num).toInt();
-        if ((r['notas'] as List).isEmpty && total > 0 && _pagina > 0) {
-          // página além do fim
-          _pagina = math.max(0, (total / _porPagina).ceil() - 1);
-          r = listar();
+        if ((r['notas'] as List).isEmpty && total > 0 && paginaAtual > 0) {
+          paginaAtual = math.max(0, (total / porPagina).ceil() - 1);
+          r = await listar();
+          if (!atual()) return;
           total = (r['total'] as num).toInt();
         }
         notas = [
@@ -327,19 +357,21 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
         erro = 'Não foi possível ler o banco de notas: $e';
       }
     }
+    if (!atual()) return;
+    _carregando = false;
+    _carregadoPrest = prest;
+    _gruposClientes = grupos;
+    _pagina = paginaAtual;
     _total = total;
     _notas = notas;
     _vazioErro = erro.isNotEmpty;
-    if (erro.isNotEmpty) {
-      _vazio = erro;
-    } else {
-      _vazio = total > 0
-          ? '$total nota(s) · serviços: R\$ ${moedaBr(soma.toStringAsFixed(2))} (sem as canceladas)'
-          : (_temFiltro
-                ? 'Nenhuma nota com esse filtro.'
-                : 'O cofre deste prestador está vazio. Use Sincronizar para '
-                      'buscar no ADN as notas emitidas e recebidas.');
-    }
+    _vazio = erro.isNotEmpty
+        ? erro
+        : total > 0
+        ? '$total nota(s) · serviços: R\$ ${moedaBr(soma.toStringAsFixed(2))} (sem as canceladas)'
+        : (_temFiltro
+              ? 'Nenhuma nota com esse filtro.'
+              : 'O cofre deste prestador está vazio. Use Sincronizar para buscar no ADN as notas emitidas e recebidas.');
     _redesenhar();
   }
 
@@ -447,7 +479,12 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
     if (_sincCancelando) return; // já está cancelando
     _sincCancelando = true;
     try {
-      ja<Object?>('nucleo.cancelar', {'ficha': _fichaSinc});
+      chamar<Object?>('nucleo.cancelar', {'ficha': _fichaSinc}).catchError((
+        Object e,
+      ) {
+        debugPrint('Falha ao cancelar: $e');
+        return null;
+      });
     } catch (_) {}
     _textoSinc =
         'Cancelando… o lote em andamento é descartado; os lotes '
@@ -524,8 +561,9 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
       if (tot != null &&
           tot['cancelado'] == true &&
           (app.cofreApagando.contains(prest) ||
-              !jaLista('cadastro.list_prestadores')
-                  .any((p) => p['documento'] == prest))) {
+              !jaLista(
+                'cadastro.list_prestadores',
+              ).any((p) => p['documento'] == prest))) {
         tot = null;
       }
       if (tot != null) {
@@ -819,6 +857,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
     var soBusca = true;
     var (xml, danfse, eventos, relatorio) = (true, false, false, false);
     var (porMes, porTipo) = (false, false);
+    var porCompetencia = _ddBasePeriodo.valor == 'competencia';
     final formatos = {for (final f in formatosExportacao.keys) f: f == 'xlsx'};
 
     String intervalo() => anterior == 'custom' ? textoDoIntervalo(de, ate) : '';
@@ -886,6 +925,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
       final tipo = ddTipo.valor;
       final sit = ddSit.valor;
       final filtro = <String, Object?>{
+        'por_competencia': porCompetencia,
         'papel': (tipo == null || tipo.isEmpty || tipo == todos) ? '' : tipo,
         'ambiente': ambRotulos.containsKey(ddAmb.valor) ? ddAmb.valor : '',
         'ini': dataIso(ini),
@@ -967,6 +1007,11 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
             ],
             quebra: true,
             idLayout: 'Grupo.cofre.lin.2',
+          ),
+          caixa(
+            'Filtrar período pela competência',
+            porCompetencia,
+            (v) => porCompetencia = v,
           ),
           if (termo.isNotEmpty)
             caixa(
@@ -1364,7 +1409,15 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
               cor: cor,
             ),
           ),
-          DataCell(_celula(4, dataHora(s('dhProc')), cor: cor)),
+          DataCell(
+            _celula(
+              4,
+              _ddBasePeriodo.valor == 'competencia'
+                  ? dataIsoParaBr(s('dCompet'))
+                  : dataHora(s('dhProc')),
+              cor: cor,
+            ),
+          ),
           DataCell(
             _celula(5, ambRotulos[s('amb')] ?? _ou(s('amb'), '?'), cor: cor),
           ),
@@ -1511,7 +1564,11 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
         coluna('NFS-e'),
         coluna('Emitente / Tomador'),
         coluna('Documento'),
-        coluna('Processada em'),
+        coluna(
+          _ddBasePeriodo.valor == 'competencia'
+              ? 'Competência'
+              : 'Processada em',
+        ),
         coluna('Ambiente'),
         coluna('Status'),
         coluna('vServ', numerica: true),
@@ -1633,7 +1690,8 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
           altura: TamanhosCofre
               .rotuloTodasAsNotasDestePrestadorEmitidasERecebidas
               .altura,
-          idLayout: 'TamanhosCofre.rotuloTodasAsNotasDestePrestadorEmitidasERecebidas',
+          idLayout:
+              'TamanhosCofre.rotuloTodasAsNotasDestePrestadorEmitidasERecebidas',
         ),
         if (!app.temPermissao('cofre.pesquisar'))
           Expanded(
@@ -1665,6 +1723,13 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
                 aoSelecionar: (_) => _filtroMudou(),
                 altura: TamanhosCofre.campoTipo2.altura,
                 idLayout: 'TamanhosCofre.campoTipo2',
+              ),
+              ListaSuspensa(
+                estado: _ddBasePeriodo,
+                rotulo: 'Data',
+                largura: 154,
+                aoSelecionar: (_) => _filtroMudou(),
+                idLayout: 'Cofre.filtrarPor',
               ),
               ListaSuspensa(
                 estado: _ddPeriodo,
@@ -1706,7 +1771,20 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
             altura: TamanhosCofre.rotuloVazio.altura,
             idLayout: 'TamanhosCofre.rotuloVazio',
           ),
-          Expanded(child: tabela),
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: AbsorbPointer(absorbing: _carregando, child: tabela),
+                ),
+                if (_carregando)
+                  const Align(
+                    alignment: Alignment.topCenter,
+                    child: LinearProgressIndicator(minHeight: 2),
+                  ),
+              ],
+            ),
+          ),
           divisor(altura: 1),
           BarraPaginacao(
             pagina: _pagina,

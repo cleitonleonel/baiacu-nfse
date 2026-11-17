@@ -9,6 +9,8 @@ pub mod banco;
 pub mod busca;
 pub mod cadastro;
 pub mod caminhos;
+#[cfg(windows)]
+pub mod dados_windows;
 pub mod catalogo;
 pub mod certificado;
 pub mod chaves;
@@ -36,6 +38,7 @@ pub mod html_preview;
 pub mod ini;
 pub mod jsonpy;
 pub mod leiaute;
+pub mod lotes;
 pub mod leitor_pdf;
 pub mod pdf;
 pub mod pyfmt;

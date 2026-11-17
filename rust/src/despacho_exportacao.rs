@@ -63,6 +63,15 @@ pub fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Option<Res<Value>> {
                 &ac,
             )
         })(),
+        "exportacao.lotes_zip" => (|| {
+            exportacao::exportar_registros_lotes(
+                texto(a, "prestador")?,
+                &despacho::lista_de_textos(a, "execucoes"),
+                Path::new(texto(a, "destino")?),
+                &opcoes(a)?,
+                &ac,
+            )
+        })(),
         "exportacao.contar_cofre" => (|| {
             js(exportacao::contar_cofre(
                 texto(a, "prestador")?,

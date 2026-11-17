@@ -317,8 +317,8 @@ class ControleLayout extends ChangeNotifier {
     });
   }
 
-  void mudar(String chave, dynamic valor) {
-    final id = selecionado;
+  void mudar(String chave, dynamic valor, {String? alvo}) {
+    final id = alvo ?? selecionado;
     if (id == null) return;
     final item = ajustes.putIfAbsent(id, () => {});
     if (valor == null) {
@@ -356,8 +356,9 @@ class ControleLayout extends ChangeNotifier {
     await f.parent.create(recursive: true);
     final temp = File('${f.path}.novo');
     await temp.writeAsString(
-      const JsonEncoder.withIndent('  ')
-          .convert({'versao': 1, 'elementos': ajustes}),
+      const JsonEncoder.withIndent(
+        '  ',
+      ).convert({'versao': 1, 'elementos': ajustes}),
       flush: true,
     );
     await temp.rename(f.path);
@@ -720,6 +721,66 @@ AjusteLayout ajusteLayout(BuildContext context, String? id) {
           ?.notifier
           ?.de(id) ??
       const AjusteLayout();
+}
+
+Widget alvoLarguraLayout(
+  BuildContext context,
+  Widget child, {
+  required String id,
+  required String nome,
+  required double largura,
+  required double minima,
+  double maxima = 4000,
+}) {
+  if (!kDebugMode) return child;
+  final controle = context
+      .dependOnInheritedWidgetOfExactType<_EscopoLayout>()
+      ?.notifier;
+  if (controle == null || !controle.ativo) return child;
+  final limite = math.min(maxima, 4000.0);
+  return alvoLayout(
+    context,
+    Stack(
+      fit: StackFit.passthrough,
+      children: [
+        child,
+        Positioned(
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 9,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.resizeLeftRight,
+            child: GestureDetector(
+              key: ValueKey('layout.largura.$id'),
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragStart: (_) => controle.selecionar(id, nome),
+              onHorizontalDragUpdate: (d) => controle.mudar(
+                'largura',
+                ((controle.de(id).largura ?? largura).clamp(minima, limite) +
+                        d.delta.dx)
+                    .clamp(minima, limite),
+                alvo: id,
+              ),
+              child: const Align(
+                alignment: Alignment.centerRight,
+                child: SizedBox(
+                  width: 2,
+                  height: 18,
+                  child: ColoredBox(color: Colors.blue),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+    id: id,
+    nome: nome,
+    tipo: 'grupo',
+    grupo: true,
+    propriedades: {'largura': largura, 'somenteLargura': true},
+  );
 }
 
 Widget alvoLayout(
@@ -1181,13 +1242,15 @@ class _EditorLayoutState extends State<EditorLayout> {
                   ),
                 ],
                 if (controle.propriedades['tipo'] != 'espaco') ...[
-                  medida('largura', 'Largura (pontos)'),
-                  if (controle.propriedades['alturaUniforme'] != true)
-                    medida('altura', 'Altura (pontos)')
-                  else
-                    const Text(
-                      'Altura padrão: ${Medida.campo} pontos. Altere Medida.campo em estilo.dart.',
-                    ),
+                  if (controle.propriedades['somenteAltura'] != true)
+                    medida('largura', 'Largura (pontos)'),
+                  if (controle.propriedades['somenteLargura'] != true)
+                    if (controle.propriedades['alturaUniforme'] != true)
+                      medida('altura', 'Altura (pontos)')
+                    else
+                      const Text(
+                        'Altura padrão: ${Medida.campo} pontos. Altere Medida.campo em estilo.dart.',
+                      ),
                 ],
                 if (controle.propriedades.containsKey('alinhamento'))
                   DropdownButtonFormField<String>(

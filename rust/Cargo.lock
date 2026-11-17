@@ -1336,6 +1336,7 @@ dependencies = [
  "unicode-normalization",
  "ureq",
  "webpki-root-certs",
+ "windows-service",
  "windows-sys 0.61.2",
  "x509-parser",
  "zip 9.0.0",

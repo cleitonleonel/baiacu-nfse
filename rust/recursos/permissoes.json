@@ -444,6 +444,14 @@
     "metodos": []
   },
   {
+    "id": "config.emissao",
+    "rotulo": "Alterar configurações de emissão em lote",
+    "pai": "config",
+    "padrao": 3,
+    "fixo": false,
+    "metodos": ["lotes.salvar_aviso"]
+  },
+  {
     "id": "config.personalizacao",
     "rotulo": "Personalização / cores / fonte",
     "pai": "config",
@@ -706,5 +714,71 @@
     "metodos": [
       "registros.consultar"
     ]
+  },
+  {
+    "id": "lotes",
+    "rotulo": "Emitir em Lote",
+    "pai": "",
+    "padrao": 1,
+    "fixo": false,
+    "metodos": [
+      "lotes.listar",
+      "lotes.obter",
+      "lotes.historico",
+      "lotes.execucoes"
+    ]
+  },
+  {
+    "id": "lotes.editar",
+    "rotulo": "Criar, editar, importar e excluir modelos de lote",
+    "pai": "lotes",
+    "padrao": 2,
+    "fixo": false,
+    "metodos": [
+      "lotes.salvar",
+      "lotes.excluir"
+    ]
+  },
+  {
+    "id": "lotes.emitir",
+    "rotulo": "Validar, emitir e retransmitir lotes",
+    "pai": "lotes",
+    "padrao": 2,
+    "fixo": false,
+    "metodos": [
+      "lotes.validar",
+      "lotes.repetido_intervalo",
+      "lotes.emitir_linha",
+      "lotes.iniciar",
+      "lotes.retransmitir"
+    ]
+  },
+  {
+    "id": "lotes.emitir.tratar",
+    "rotulo": "Tratar pendências e finalizar emissões em lote",
+    "pai": "lotes.emitir",
+    "padrao": 2,
+    "fixo": false,
+    "metodos": [
+      "lotes.remover_falha",
+      "lotes.editar_linha",
+      "lotes.finalizar"
+    ]
+  },
+  {
+    "id": "lotes.exportar_modelo",
+    "rotulo": "Exportar modelos de lote (JSON)",
+    "pai": "lotes",
+    "padrao": 1,
+    "fixo": false,
+    "metodos": []
+  },
+  {
+    "id": "lotes.exportar",
+    "rotulo": "Exportar relatórios e documentos das emissões em lote",
+    "pai": "lotes",
+    "padrao": 1,
+    "fixo": false,
+    "metodos": ["exportacao.lotes_zip"]
   }
 ]

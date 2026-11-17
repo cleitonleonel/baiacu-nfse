@@ -42,6 +42,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::caminhos;
 use crate::erro::{Erro, Res};
 use crate::texto::aparar;
 use crate::xml::{self, Elemento};
@@ -2075,6 +2076,14 @@ fn conferir_conexao(con: &Connection) -> String {
 /// cifrado e a estrutura do SQLite. Devolve 'ok', 'danificado: …' (o arquivo está estragado) ou
 /// 'indisponível: …' (não deu para conferir agora — NÃO quer dizer que esteja estragado).
 pub fn verificar(caminho: Option<&Path>) -> String {
+    verificar_arquivo(caminho, false)
+}
+
+pub(crate) fn verificar_copia_usuario(caminho: &Path) -> String {
+    verificar_arquivo(Some(caminho), true)
+}
+
+fn verificar_arquivo(caminho: Option<&Path>, externo: bool) -> String {
     let con = match caminho {
         Some(p) => {
             let chave = match chave() {
@@ -2082,6 +2091,10 @@ pub fn verificar(caminho: Option<&Path>) -> String {
                 Err(e) if e.tipo == "CofreIlegivel" => return format!("{DANIFICADO}{e}"),
                 Err(e) => return format!("{INDISPONIVEL}{e}"),
             };
+            if externo {
+                return caminhos::arquivo_usuario(|| ligar(&chave, p).map(|c| conferir_conexao(&c)).map_err(crate::erro::Erro::from))
+                    .unwrap_or_else(|e| format!("{INDISPONIVEL}{e}"));
+            }
             match ligar(&chave, p) {
                 Ok(c) => c,
                 Err(e) if operacional(&e) => return format!("{INDISPONIVEL}{}", msg_sqlite(&e)),
@@ -2614,6 +2627,7 @@ pub struct Nota {
     pub nNFSe: String,
     pub dhProc: String,
     pub dt: String,
+    pub dCompet: String,
     pub emit_doc: String,
     pub emit_nome: String,
     pub toma_doc: String,
@@ -2653,7 +2667,7 @@ impl Nota {
     }
 }
 
-const COLUNAS: [&str; 17] = [
+const COLUNAS: [&str; 18] = [
     "id",
     "chave",
     "papel",
@@ -2671,6 +2685,7 @@ const COLUNAS: [&str; 17] = [
     "cancelada",
     "subst_por",
     "origem",
+    "dCompet",
 ];
 const OUTRO_DOC: &str = "(CASE papel WHEN 'E' THEN toma_doc ELSE emit_doc END)";
 
@@ -2720,6 +2735,7 @@ fn nota_da_linha(r: &rusqlite::Row) -> rusqlite::Result<Nota> {
         cancelada: r.get::<_, i64>(14)? != 0,
         subst_por: r.get(15)?,
         origem: r.get(16)?,
+        dCompet: r.get(17)?,
     })
 }
 
@@ -2730,6 +2746,7 @@ pub struct Filtro {
     pub papel: String,
     pub amb: String,
     /// Datas ISO ('AAAA-MM-DD'); vazio = sem limite.
+    pub por_competencia: bool,
     pub ini: String,
     pub fim: String,
     /// A busca das telas de notas — regra única em `busca`.
@@ -2759,12 +2776,13 @@ pub fn listar(dono: &str, f: &Filtro) -> Res<(Vec<Nota>, i64, f64)> {
             args.push(json!(valor));
         }
     }
+    let data = if f.por_competencia { "dCompet" } else { "dt" };
     if !f.ini.is_empty() {
-        onde.push("dt >= ?".into());
+        onde.push(format!("{data} >= ?"));
         args.push(json!(f.ini));
     }
     if !f.fim.is_empty() {
-        onde.push("dt <= ?".into());
+        onde.push(format!("{data} <= ?"));
         args.push(json!(f.fim));
     }
     match f.situacao.as_str() {
@@ -2800,7 +2818,7 @@ pub fn listar(dono: &str, f: &Filtro) -> Res<(Vec<Nota>, i64, f64)> {
             "coalesce(g.nome, '') COLLATE NOCASE",
         )
     } else {
-        (String::new(), ordem_sql(&coluna))
+        (String::new(), if coluna == "data" && f.por_competencia { "dCompet" } else { ordem_sql(&coluna) })
     };
     let mut ordenar = format!(
         "{expr} {}, nota.id DESC",
@@ -2913,7 +2931,7 @@ pub fn danfse_para_abrir(dono: &str, chave: &str) -> Res<PathBuf> {
             .map(|(_, hash)| *hash)
     });
     if let Some(hash) = esperado
-        && let Ok(bytes) = std::fs::read(&caminho)
+        && let Ok(bytes) = caminhos::arquivo_usuario(|| std::fs::read(&caminho))
         && <[u8; 32]>::from(Sha256::digest(&bytes)) == hash
     {
         leitor.conferir_sessao()?;
@@ -2921,7 +2939,7 @@ pub fn danfse_para_abrir(dono: &str, chave: &str) -> Res<PathBuf> {
     }
     let pdf = crate::danfse::gerar(&xml, nota.cancelada, !nota.subst_por.is_empty())?;
     leitor.conferir_sessao()?;
-    std::fs::write(&caminho, &pdf)?;
+    caminhos::arquivo_usuario(|| std::fs::write(&caminho, &pdf))?;
     if let Ok(mut cache) = CACHE.lock() {
         cache.retain(|(k, _)| k != &identidade);
         cache.push_back((identidade, Sha256::digest(&pdf).into()));
@@ -2977,6 +2995,16 @@ impl LeitorXml {
         xml_da_nota_em(&self.con, nota_id)
     }
 
+    pub(crate) fn nota(&self, dono: &str, chave: &str) -> Res<Option<Nota>> {
+        self.conferir_sessao()?;
+        nota_por_chave_em(&self.con, dono, chave)
+    }
+
+    pub(crate) fn xml_disponivel(&self, nota_id: i64) -> Res<Option<Vec<u8>>> {
+        self.conferir_sessao()?;
+        xml_disponivel_em(&self.con, nota_id)
+    }
+
     pub(crate) fn eventos(&self, dono: &str, chave: &str) -> Res<Vec<Evento>> {
         self.conferir_sessao()?;
         eventos_da_nota_em(&self.con, dono, chave)
@@ -2984,6 +3012,11 @@ impl LeitorXml {
 }
 
 fn xml_da_nota_em(con: &Connection, nota_id: i64) -> Res<Vec<u8>> {
+    xml_disponivel_em(con, nota_id)?
+        .ok_or_else(|| erro("O XML desta nota não está no banco de notas."))
+}
+
+fn xml_disponivel_em(con: &Connection, nota_id: i64) -> Res<Option<Vec<u8>>> {
     let linha: Option<(Vec<u8>, String, i64, Vec<u8>)> = con
         .query_row(
             "SELECT sha, certs, molde, dados FROM nota_xml WHERE nota=?1",
@@ -2991,10 +3024,9 @@ fn xml_da_nota_em(con: &Connection, nota_id: i64) -> Res<Vec<u8>> {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .optional()?;
-    match linha {
-        Some((sha_gravado, certs, molde, dados)) => abrir(con, &sha_gravado, &certs, molde, &dados),
-        None => Err(erro("O XML desta nota não está no banco de notas.")),
-    }
+    linha
+        .map(|(sha_gravado, certs, molde, dados)| abrir(con, &sha_gravado, &certs, molde, &dados))
+        .transpose()
 }
 
 /// Um evento guardado de uma nota.
@@ -3100,8 +3132,8 @@ pub fn vazio(dono: &str) -> Res<bool> {
 // DANFSe na hora (nada é guardado: o PDF vai para a pasta temporária do sistema)
 // --------------------------------------------------------------------------------------------- //
 pub fn pasta_temporaria() -> Res<PathBuf> {
-    let pasta = std::env::temp_dir().join("BaiacuNFSe").join("cofre");
-    std::fs::create_dir_all(&pasta)?;
+    let pasta = caminhos::temporarios_usuario().join("BaiacuNFSe").join("cofre");
+    caminhos::arquivo_usuario(|| std::fs::create_dir_all(&pasta))?;
     Ok(pasta)
 }
 

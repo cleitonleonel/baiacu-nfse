@@ -232,7 +232,7 @@ pub fn fazer_acompanhando(destino: &str, partes: &[String], avisar: &dyn Fn(&Val
         ));
     }
     if let Some(pai) = dest.parent() {
-        std::fs::create_dir_all(pai)?;
+        caminhos::arquivo_usuario(|| std::fs::create_dir_all(pai))?;
     }
     let tmp = {
         let mut s = dest.as_os_str().to_os_string();
@@ -262,7 +262,7 @@ pub fn fazer_acompanhando(destino: &str, partes: &[String], avisar: &dyn Fn(&Val
             .compression_method(CompressionMethod::Stored)
             .large_file(true)
             .last_modified_time(agora_zip());
-        let mut zf = ZipWriter::new(std::fs::File::create(&tmp)?);
+        let mut zf = ZipWriter::new(caminhos::arquivo_usuario(|| std::fs::File::create(&tmp))?);
         let mut feito = 0;
         let mut ultimo = 0;
         for parte in &partes {
@@ -311,7 +311,7 @@ pub fn fazer_acompanhando(destino: &str, partes: &[String], avisar: &dyn Fn(&Val
         zf.write_all(texto.as_bytes())?;
         zf.finish().map_err(zip_erro)?.sync_all()?;
         // relê e confere (CRC) antes de valer
-        let mut lido = ZipArchive::new(std::fs::File::open(&tmp)?).map_err(zip_erro)?;
+        let mut lido = ZipArchive::new(caminhos::arquivo_usuario(|| std::fs::File::open(&tmp))?).map_err(zip_erro)?;
         let total_verificacao = (0..lido.len())
             .filter_map(|i| lido.by_index(i).ok().map(|e| e.size()))
             .sum();
@@ -339,14 +339,14 @@ pub fn fazer_acompanhando(destino: &str, partes: &[String], avisar: &dyn Fn(&Val
             }
         }
         drop(lido);
-        std::fs::rename(&tmp, &dest)?;
+        caminhos::arquivo_usuario(|| std::fs::rename(&tmp, &dest))?;
         Ok(())
     };
     let r = gravar();
-    let _ = std::fs::remove_file(&tmp);
+    let _ = caminhos::arquivo_usuario(|| std::fs::remove_file(&tmp));
     r?;
     avisar(&json!({"percentual": 100, "etapa": "Backup concluído"}));
-    let bytes = std::fs::metadata(&dest)?.len();
+    let bytes = caminhos::arquivo_usuario(|| std::fs::metadata(&dest))?.len();
     let segundos = t0.elapsed().as_secs_f64();
     registro::info(
         "backup",
@@ -374,7 +374,7 @@ fn abrir_zip(origem: &str) -> Res<Zip> {
             "O arquivo não é um backup deste programa ou está danificado ({e})."
         ))
     };
-    let f = std::fs::File::open(origem).map_err(|e| danificado(e.to_string()))?;
+    let f = caminhos::arquivo_usuario(|| std::fs::File::open(origem)).map_err(|e| danificado(e.to_string()))?;
     ZipArchive::new(f).map_err(|e| danificado(e.to_string()))
 }
 
@@ -467,6 +467,9 @@ fn temporario(parte: &str) -> PathBuf {
 /// senha mestra se ele é de outro banco (a senha mestra DELE tem de ser informada). Não muda nada
 /// nesta instalação.
 pub fn examinar(origem: &str, senha_mestra: &str) -> Res<Value> {
+    let _trava = TRAVA_BACKUP
+        .try_lock()
+        .map_err(|_| erro("Já existe um backup ou uma restauração em andamento."))?;
     if banco::chave_atual().is_none() {
         return Err(Erro::trancado("Só um usuário logado restaura um backup."));
     }
@@ -497,6 +500,9 @@ pub fn examinar(origem: &str, senha_mestra: &str) -> Res<Value> {
 /// arquivo; troca primeiro as notas, depois os dados. Devolve o que restaurou. Restaurando os
 /// dados, o processo deve REINICIAR em seguida (quem chama cuida disso).
 pub fn restaurar(origem: &str, partes: &[String], senha_mestra: &str) -> Res<Vec<String>> {
+    let _trava = TRAVA_BACKUP
+        .try_lock()
+        .map_err(|_| erro("Já existe um backup ou uma restauração em andamento."))?;
     let pedidas = partes_pedidas(partes)?;
     let mut extraidos: Vec<(&str, PathBuf)> = Vec::new();
     let feito = (|| -> Res<()> {

@@ -306,7 +306,9 @@ pub fn executar(metodo: &str, a: &Value) -> Option<Res<Value>> {
         "cadastro.detalhes_de_cobranca" => Ok(cadastro::detalhes_de_cobranca()),
         "cadastro.rtc_required" => (|| {
             let f: ServicoForm = form(a, "form")?;
-            let competencia = opcional(a, "competencia").and_then(tx::parse_iso_date);
+            let competencia = opcional(a, "competencia")
+                .map(|data| tx::parse_iso_date(data).ok_or_else(|| Erro::valor("Data de competência inválida.")))
+                .transpose()?;
             js(cadastro::rtc_required(
                 texto(a, "prestador")?,
                 &f,

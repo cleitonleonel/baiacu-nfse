@@ -47,6 +47,7 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  mensagem_fechar_instalador_ = ::RegisterWindowMessageW(L"BaiacuNFSe.FecharParaInstalar.v1");
   mensagem_taskbar_criada_ = ::RegisterWindowMessageW(L"TaskbarCreated");
   janela_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       flutter_controller_->engine()->messenger(), "baiacu/janela",
@@ -160,6 +161,10 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (mensagem_fechar_instalador_ != 0 && message == mensagem_fechar_instalador_) {
+    if (janela_) janela_->InvokeMethod("fecharParaInstalar", nullptr);
+    return 0;
+  }
   if (mensagem_taskbar_criada_ != 0 && message == mensagem_taskbar_criada_) {
     if (na_bandeja_ && !AdicionarIcone(hwnd)) RestaurarDaBandeja(hwnd);
     return 0;

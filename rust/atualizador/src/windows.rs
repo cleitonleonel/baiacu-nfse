@@ -14,15 +14,24 @@ use std::{
 use windows_service::{
     define_windows_service,
     service::{
-        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
-        ServiceType,
+        ServiceAccess, ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState,
+        ServiceStatus, ServiceType,
     },
     service_control_handler::{self, ServiceControlHandlerResult},
     service_dispatcher,
+    service_manager::{ServiceManager, ServiceManagerAccess},
 };
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, GetLastError, WAIT_OBJECT_0},
-    Security::{TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_QUERY},
+    Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, GetLastError, LocalFree, WAIT_OBJECT_0},
+    Security::{
+        Authorization::{
+            ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+        },
+        DACL_SECURITY_INFORMATION, LookupAccountNameW, OWNER_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, SetFileSecurityW, TOKEN_ASSIGN_PRIMARY,
+        TOKEN_DUPLICATE, TOKEN_QUERY,
+    },
+    Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle},
     System::Threading::{
         OpenMutexW, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
         QueryFullProcessImageNameW, WaitForSingleObject,
@@ -123,8 +132,249 @@ fn system(name: &str) -> Result<PathBuf> {
             .join(name),
     )
 }
+const SERVICO_DADOS: &str = "BaiacuNFSeDados";
+const CONTA_DADOS: &str = r"NT SERVICE\BaiacuNFSeDados";
+const EXE_DADOS: &str = "data/dll/baiacu-dados.exe";
+const NOME_DADOS: &str = "Baiacu NFSe - Dados";
+
+fn servico_dados(acesso: ServiceAccess) -> Result<Option<windows_service::service::Service>> {
+    let scm = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+    match scm.open_service(SERVICO_DADOS, acesso) {
+        Ok(servico) => Ok(Some(servico)),
+        Err(windows_service::Error::Winapi(e)) if e.raw_os_error() == Some(1060) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn parar_dados(remover: bool) -> Result<()> {
+    let mut acesso = ServiceAccess::QUERY_STATUS | ServiceAccess::STOP;
+    if remover {
+        acesso |= ServiceAccess::DELETE;
+    }
+    let Some(servico) = servico_dados(acesso)? else {
+        return Ok(());
+    };
+    let estado = servico.query_status()?.current_state;
+    if estado != ServiceState::Stopped && estado != ServiceState::StopPending {
+        if let Err(e) = servico.stop()
+            && servico.query_status()?.current_state != ServiceState::Stopped
+        {
+            return Err(e.into());
+        }
+    }
+    let limite = Instant::now() + Duration::from_secs(45);
+    while servico.query_status()?.current_state != ServiceState::Stopped {
+        if Instant::now() >= limite {
+            return Err("O serviço de dados ainda está concluindo uma tarefa. Tente novamente em instantes.".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if remover {
+        servico.delete()?;
+    }
+    Ok(())
+}
+
+fn sid_dados() -> Result<String> {
+    use std::ptr::{null, null_mut};
+    let conta = wide(std::ffi::OsStr::new(CONTA_DADOS));
+    let mut sid_len = 0;
+    let mut dominio_len = 0;
+    let mut tipo = 0;
+    unsafe {
+        LookupAccountNameW(
+            null(),
+            conta.as_ptr(),
+            null_mut(),
+            &mut sid_len,
+            null_mut(),
+            &mut dominio_len,
+            &mut tipo,
+        );
+    }
+    if sid_len == 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    // SID deve ter alinhamento de DWORD.
+    let mut sid = vec![0u32; (sid_len as usize).div_ceil(4)];
+    let mut dominio = vec![0u16; dominio_len as usize];
+    let mut texto = null_mut();
+    unsafe {
+        if LookupAccountNameW(
+            null(),
+            conta.as_ptr(),
+            sid.as_mut_ptr().cast(),
+            &mut sid_len,
+            dominio.as_mut_ptr(),
+            &mut dominio_len,
+            &mut tipo,
+        ) == 0
+            || ConvertSidToStringSidW(sid.as_mut_ptr().cast(), &mut texto) == 0
+        {
+            return Err(io::Error::last_os_error().into());
+        }
+        let mut len = 0;
+        while *texto.add(len) != 0 {
+            len += 1;
+        }
+        let convertido = String::from_utf16_lossy(std::slice::from_raw_parts(texto, len));
+        LocalFree(texto.cast());
+        Ok(convertido)
+    }
+}
+
+fn aplicar_acl(pasta: &Path, aces: &str) -> Result<()> {
+    use std::ptr::null_mut;
+    let sddl = wide(std::ffi::OsStr::new(&format!(
+        "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA){aces}"
+    )));
+    let mut descritor = null_mut();
+    if unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            1,
+            &mut descritor,
+            null_mut(),
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error().into());
+    }
+    let resultado = unsafe {
+        SetFileSecurityW(
+            wide(pasta.as_os_str()).as_ptr(),
+            OWNER_SECURITY_INFORMATION
+                | DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION,
+            descritor,
+        )
+    };
+    let erro = (resultado == 0).then(io::Error::last_os_error);
+    unsafe { LocalFree(descritor) };
+    if let Some(erro) = erro {
+        return Err(format!("Falha ao proteger {}: {erro}", pasta.display()).into());
+    }
+    Ok(())
+}
+
+fn legados_sem_links(pasta: &Path) -> Result<()> {
+    update::no_links(pasta)?;
+    for item in fs::read_dir(pasta)? {
+        let item = item?;
+        let caminho = item.path();
+        update::no_links(&caminho)?;
+        if item.file_type()?.is_dir() {
+            legados_sem_links(&caminho)?;
+        } else {
+            let arquivo = fs::File::open(&caminho)?;
+            let mut info = BY_HANDLE_FILE_INFORMATION::default();
+            if unsafe { GetFileInformationByHandle(arquivo.as_raw_handle(), &mut info) } == 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+            if info.nNumberOfLinks != 1 {
+                return Err(format!("Vínculo físico recusado em {}", caminho.display()).into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn icacls(pasta: &Path, args: &[&str]) -> Result<()> {
+    let status = std::process::Command::new(system("icacls.exe")?)
+        .arg(pasta)
+        .args(args)
+        .creation_flags(0x08000000)
+        .status()?;
+    if !status.success() {
+        return Err(format!("Falha ao proteger {} ({status}).", pasta.display()).into());
+    }
+    Ok(())
+}
+
+fn preparar_dados(root: &Path) -> Result<()> {
+    let exe = root.join(EXE_DADOS);
+    update::no_links(&exe)?;
+    if !exe.is_file() {
+        return Err("Executável do serviço de dados ausente.".into());
+    }
+    parar_dados(false)?;
+    let comando = format!("\"{}\"", exe.display());
+    let acao = if servico_dados(ServiceAccess::QUERY_STATUS)?.is_some() {
+        "config"
+    } else {
+        "create"
+    };
+    sc(&[
+        acao,
+        SERVICO_DADOS,
+        "binPath=",
+        &comando,
+        "start=",
+        "demand",
+        "obj=",
+        CONTA_DADOS,
+        "DisplayName=",
+        NOME_DADOS,
+    ])?;
+    sc(&[
+        "description",
+        SERVICO_DADOS,
+        "Serviço responsável por proteger e acessar os bancos do Baiacu NFSe.",
+    ])?;
+    sc(&[
+        "sdset",
+        SERVICO_DADOS,
+        "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;CCLCSWRPLO;;;BU)",
+    ])?;
+
+    let dados = PathBuf::from(std::env::var_os("ProgramData").ok_or("ProgramData ausente")?)
+        .join("Baiacu NFS-e");
+    update::no_links(&dados)?;
+    fs::create_dir_all(&dados)?;
+    let sid = sid_dados()?;
+    // Usuários comuns precisam atravessar a raiz, sem poder trocar seus subdiretórios.
+    aplicar_acl(&dados, &format!("(A;;0x1200a9;;;BU)(A;;0x1200a9;;;{sid})"))?;
+    for (nome, leitores) in [("database", ""), ("logs", "(A;OICI;0x1200a9;;;BU)")] {
+        let pasta = dados.join(nome);
+        update::no_links(&pasta)?;
+        fs::create_dir_all(&pasta)?;
+        aplicar_acl(&pasta, &format!("(A;OICI;0x1301bf;;;{sid}){leitores}"))?;
+        legados_sem_links(&pasta)?;
+        // Retira DACLs e proprietários explícitos dos arquivos das instalações antigas.
+        for filho in fs::read_dir(&pasta)? {
+            let filho = filho?.path();
+            icacls(&filho, &["/reset", "/T", "/L", "/Q"])?;
+            icacls(&filho, &["/setowner", "*S-1-5-32-544", "/T", "/L", "/Q"])?;
+        }
+    }
+    let legado = root.join("database-legado");
+    if legado.is_dir() {
+        legados_sem_links(&legado)?;
+        aplicar_acl(&legado, "")?;
+        for filho in fs::read_dir(&legado)? {
+            let filho = filho?.path();
+            icacls(&filho, &["/reset", "/T", "/L", "/Q"])?;
+            icacls(&filho, &["/setowner", "*S-1-5-32-544", "/T", "/L", "/Q"])?;
+        }
+    }
+    let servico = servico_dados(ServiceAccess::START | ServiceAccess::QUERY_STATUS)?
+        .ok_or("Serviço de dados ausente")?;
+    servico.start::<&str>(&[])?;
+    let limite = Instant::now() + Duration::from_secs(10);
+    loop {
+        match servico.query_status()?.current_state {
+            ServiceState::Running => return Ok(()),
+            ServiceState::Stopped => return Err("O serviço de dados não conseguiu iniciar.".into()),
+            _ if Instant::now() >= limite => {
+                return Err("O serviço de dados não respondeu ao instalador.".into());
+            }
+            _ => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
+}
+
 fn repair() -> Result<()> {
-    installed()?;
+    let root = installed()?;
     let bin = format!("\"{}\" --service", std::env::current_exe()?.display());
     let exists = std::process::Command::new(system("sc.exe")?)
         .args(["query", SERVICE])
@@ -153,16 +403,27 @@ fn repair() -> Result<()> {
             "obj=",
             "LocalSystem",
             "DisplayName=",
-            "Atualização do Baiacu NFS-e",
+            "Baiacu NFSe - Atualização",
         ])?;
     }
+    sc(&[
+        "config",
+        SERVICE,
+        "DisplayName=",
+        "Baiacu NFSe - Atualização",
+    ])?;
+    sc(&[
+        "description",
+        SERVICE,
+        "Serviço responsável por cuidar das atualizações do Baiacu NFSe.",
+    ])?;
     // Usuários podem consultar/iniciar; não podem mudar configuração, parar ou remover.
     sc(&[
         "sdset",
         SERVICE,
         "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;CCLCSWRPLO;;;BU)",
     ])?;
-    Ok(())
+    preparar_dados(&root)
 }
 fn open_app(pid: u32, root: &Path) -> Result<OwnedHandle> {
     unsafe {
@@ -322,6 +583,7 @@ fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> 
             &install_area.path().join("novo"),
             &manifest,
         )?;
+        parar_dados(false)?;
         let result = update::install(&source, &root, || {
             crate::startup_probe::check(&root, Some(&token))
         });
@@ -429,7 +691,13 @@ fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> 
         "Verificando e extraindo o pacote",
         false,
     )?;
-    update::extract(&zip, &temp.path().join("novo"), &manifest)?;
+    let candidato = update::extract(&zip, &temp.path().join("novo"), &manifest)?;
+    if candidato.join(EXE_DADOS).is_file() && servico_dados(ServiceAccess::QUERY_STATUS)?.is_none()
+    {
+        return Err(
+            "Execute o instalador da nova versão para registrar o serviço de dados.".into(),
+        );
+    }
     if prepared.exists() {
         update::no_links(&prepared)?;
         fs::remove_dir_all(&prepared)?;
@@ -539,9 +807,16 @@ pub fn run() -> Result<()> {
             Ok(())
         }
         Some("--repair") => repair(),
+        Some("--dados-parar" | "--dados-remover") => {
+            installed()?;
+            parar_dados(args[1] == "--dados-remover")
+        }
         Some("--recover") => {
             let root = root()?;
             let _guard = UpdateGuard::acquire(&root)?;
+            if root.join("installed.marker").is_file() {
+                parar_dados(false)?;
+            }
             update::recover(&root)
         }
         Some("--remove") => {

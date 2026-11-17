@@ -7,6 +7,12 @@ import 'package:flutter/material.dart';
 import '../app/app.dart';
 import '../kit/campo.dart';
 import '../kit/flet.dart';
+import '../kit/formatos.dart' show lerDataDoCampo;
+
+const opcoesBasePeriodo = [
+  Opcao('emissao', 'Emissão'),
+  Opcao('competencia', 'Competência'),
+];
 
 const periodos = [
   ('hoje', 'Hoje'),
@@ -20,9 +26,11 @@ const periodos = [
 const larguraPeriodoComDatas = 270.0;
 
 String _z(int n) => n.toString().padLeft(2, '0');
-String dataBr(DateTime d) => '${_z(d.day)}/${_z(d.month)}/${d.year}';
-String dataIso(DateTime? d) =>
-    d == null ? '' : '${d.year}-${_z(d.month)}-${_z(d.day)}';
+String dataBr(DateTime d) =>
+    '${_z(d.day)}/${_z(d.month)}/${d.year.toString().padLeft(4, '0')}';
+String dataIso(DateTime? d) => d == null
+    ? ''
+    : '${d.year.toString().padLeft(4, '0')}-${_z(d.month)}-${_z(d.day)}';
 String dataCompacta(DateTime? d, String vazio) =>
     d == null ? vazio : '${d.year}${_z(d.month)}${_z(d.day)}';
 
@@ -93,16 +101,16 @@ const _semana = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']; // domingo → sábado
 final _calMin = DateTime(2020, 1, 1);
 final _calMax = DateTime(2100, 12, 31);
 
-bool _noIntervalo(DateTime d) => !d.isBefore(_calMin) && !d.isAfter(_calMax);
-
 class _Dia extends StatefulWidget {
   const _Dia({
     super.key,
     required this.dia,
     required this.meu,
     required this.aoClicar,
+    required this.habilitado,
   });
   final DateTime dia;
+  final bool habilitado;
   final bool meu;
   final VoidCallback aoClicar;
 
@@ -116,9 +124,8 @@ class _DiaState extends State<_Dia> {
   @override
   Widget build(BuildContext context) {
     final meu = widget.meu; // a ÚNICA marca do calendário: a data dele
-    final dentroDoIntervalo = _noIntervalo(widget.dia);
+    final dentroDoIntervalo = widget.habilitado;
     final caixa = Ct(
-      largura: 38,
       altura: 32,
       raio: BorderRadius.circular(8),
       alinhar: Alignment.center,
@@ -152,27 +159,96 @@ class _DiaState extends State<_Dia> {
   }
 }
 
-/// Dois calendários INDEPENDENTES — data inicial à esquerda, final à direita. Cada um marca
-/// só a PRÓPRIA data e tem um campo para digitá-la (dd/mm/aaaa); clicar num dia preenche o
-/// campo, digitar leva o calendário ao mês. "Confirmar" exige as duas datas, com a final não
-/// anterior à inicial. [aoOk] roda ao confirmar; [aoCancelar] se a janela fechar de qualquer
-/// outro jeito (Cancelar, X, Esc).
+void abrirCompetencia(
+  App app,
+  DateTime inicial,
+  void Function(DateTime, bool) aoOk, {
+  bool permitirReplicar = false,
+}) => _abrirCalendario(
+  app,
+  inicial,
+  null,
+  titulo: 'Data de competência',
+  rotuloInicial: 'Competência',
+  idLayout: permitirReplicar
+      ? 'Janela.lotes.competencia'
+      : 'Janela.emitir.competencia',
+  minimo: DateTime(1),
+  maximo: DateUtils.dateOnly(DateTime.now()),
+  erroFutura: 'A competência não pode ser posterior a hoje.',
+  permitirReplicar: permitirReplicar,
+  aoDia: aoOk,
+);
+
+void abrirVencimento(App app, DateTime? inicial, ValueChanged<DateTime> aoOk) =>
+    _abrirCalendario(
+      app,
+      inicial,
+      null,
+      titulo: 'Vencimento original',
+      rotuloInicial: 'Vencimento',
+      idLayout: 'Vencimento.calendario',
+      minimo: DateTime(1900),
+      maximo: DateTime(2199, 12, 31),
+      aoDia: (dia, _) => aoOk(dia),
+    );
+
+/// Seleciona as duas datas do intervalo com calendários independentes.
 void abrirPeriodo(
   App app,
   DateTime? de,
   DateTime? ate,
-  void Function(DateTime de, DateTime ate) aoOk, [
+  void Function(DateTime, DateTime) aoOk, [
   VoidCallback? aoCancelar,
-]) {
+]) => _abrirCalendario(
+  app,
+  de,
+  ate,
+  titulo: 'Período personalizado',
+  rotuloInicial: 'Data inicial',
+  idLayout: 'Janela.periodo.Dialogo.1',
+  minimo: _calMin,
+  maximo: _calMax,
+  aoPeriodo: aoOk,
+  aoCancelar: aoCancelar,
+);
+
+void _abrirCalendario(
+  App app,
+  DateTime? de,
+  DateTime? ate, {
+  required String titulo,
+  required String rotuloInicial,
+  required String idLayout,
+  required DateTime minimo,
+  required DateTime maximo,
+  String? erroFutura,
+  bool permitirReplicar = false,
+  VoidCallback? aoCancelar,
+  void Function(DateTime, DateTime)? aoPeriodo,
+  void Function(DateTime, bool)? aoDia,
+}) {
+  final unica = aoDia != null;
+  bool replicar = false;
   late final Dialogo d;
-  final sel = <String, DateTime?>{'de': de, 'ate': ate};
+  bool dentroDoIntervalo(DateTime x) =>
+      !x.isBefore(minimo) && !x.isAfter(maximo);
+  DateTime? diaValido(DateTime? valor) {
+    if (valor == null) return null;
+    final dia = DateUtils.dateOnly(valor);
+    return dentroDoIntervalo(dia) ? dia : null;
+  }
+
+  final sel = <String, DateTime?>{'de': diaValido(de), 'ate': diaValido(ate)};
   final campos = <String, TextEditingController>{};
   final focos = <String, FocusNode>{};
   final erros = <String, String?>{'de': null, 'ate': null};
   final mes = <String, (int, int)>{};
+  const larguraPainel = 286.0;
+  const larguraPeriodo = 2 * larguraPainel + 41;
 
   DateTime limitar(DateTime x) =>
-      x.isBefore(_calMin) ? _calMin : (x.isAfter(_calMax) ? _calMax : x);
+      x.isBefore(minimo) ? minimo : (x.isAfter(maximo) ? maximo : x);
 
   bool invertido() {
     final (a, b) = (sel['de'], sel['ate']);
@@ -180,37 +256,33 @@ void abrirPeriodo(
   }
 
   bool podeConfirmar() =>
-      sel['de'] != null && sel['ate'] != null && !invertido();
+      sel['de'] != null && (unica || (sel['ate'] != null && !invertido()));
 
   void confirmar() {
     d.aoFechar = null; // daqui em diante, fechar NÃO é desistir
     app.fecharEsta(d);
-    aoOk(sel['de']!, sel['ate']!);
+    if (unica) {
+      aoDia(sel['de']!, replicar);
+    } else {
+      aoPeriodo!(sel['de']!, sel['ate']!);
+    }
   }
 
   bool mesValido(int ano, int m) {
     final ultimo = DateTime(ano, m + 1, 0);
-    return !ultimo.isBefore(_calMin) && !DateTime(ano, m, 1).isAfter(_calMax);
+    return !ultimo.isBefore(minimo) && !DateTime(ano, m, 1).isAfter(maximo);
   }
 
   void digitou(String qual, String texto) {
-    // Máscara: só dígitos, as barras entram sozinhas (01102026 -> 01/10/2026).
-    var dig = texto.replaceAll(RegExp(r'[^0-9]'), '');
-    if (dig.length > 8) dig = dig.substring(0, 8);
-    DateTime? valida;
+    final data = lerDataDoCampo(texto);
+    final valida = diaValido(data);
     erros[qual] = null;
-    if (dig.length == 8) {
-      final (dia, m, ano) = (
-        int.parse(dig.substring(0, 2)),
-        int.parse(dig.substring(2, 4)),
-        int.parse(dig.substring(4)),
-      );
-      final x = DateTime(ano, m, dia);
-      valida = (x.year == ano && x.month == m && x.day == dia) ? x : null;
-      if (valida == null || !_noIntervalo(valida)) {
-        valida = null;
-        erros[qual] = 'Data inválida';
-      }
+    if (texto.length == 10 && valida == null) {
+      erros[qual] = data == null
+          ? 'Data inválida'
+          : data.isAfter(maximo) && erroFutura != null
+          ? erroFutura
+          : 'Data fora do intervalo permitido.';
     }
     final mudou = valida != sel[qual];
     sel[qual] = valida; // data incompleta ou inválida = sem data
@@ -218,7 +290,8 @@ void abrirPeriodo(
       mes[qual] = (valida.year, valida.month); // o calendário acompanha
     d.atualizar();
     // terminou a inicial: segue para a final
-    if (valida != null && qual == 'de' && mudou) app.focar(focos['ate']);
+    if (!unica && valida != null && qual == 'de' && mudou)
+      app.focar(focos['ate']);
   }
 
   String mascara(String texto) {
@@ -243,7 +316,7 @@ void abrirPeriodo(
 
     final primeiro = DateTime(ano, m, 1);
     final ultimo = DateTime(ano, m + 1, 0);
-    var dia = primeiro.subtract(Duration(days: primeiro.weekday % 7));
+    var dia = DateTime(ano, m, 1 - primeiro.weekday % 7);
     final semanas = <List<DateTime>>[];
     while (!dia.isAfter(ultimo)) {
       semanas.add([
@@ -305,103 +378,134 @@ void abrirPeriodo(
                 altura: TamanhosPeriodo.botaoProximoMes.altura,
                 idLayout: 'TamanhosPeriodo.botaoProximoMes',
               ),
-            ], idLayout: 'Grupo.periodo.lin.1'),
+            ], idLayout: 'Grupo.periodo.lin.1.$qual'),
             col(
               [
                 lin(
                   [
                     for (final x in _semana)
-                      Ct(
-                        largura: 38,
-                        alinhar: Alignment.center,
-                        child: Tx(
-                          x,
-                          tam: Letra.apoio,
-                          cor: Colors.grey.shade600,
-                          peso: FontWeight.w600,
-                          largura: TamanhosPeriodo.rotuloX.largura,
-                          altura: TamanhosPeriodo.rotuloX.altura,
-                          idLayout: 'TamanhosPeriodo.rotuloX',
+                      Expanded(
+                        child: Center(
+                          child: Tx(
+                            x,
+                            tam: Letra.apoio,
+                            cor: Colors.grey.shade600,
+                            peso: FontWeight.w600,
+                            largura: TamanhosPeriodo.rotuloX.largura,
+                            altura: TamanhosPeriodo.rotuloX.altura,
+                            idLayout: 'TamanhosPeriodo.rotuloX',
+                          ),
                         ),
                       ),
                   ],
                   espaco: 2,
-                  idLayout: 'Grupo.periodo.lin.2',
+                  idLayout: 'Grupo.periodo.lin.2.$qual',
                 ),
                 for (final semana in semanas)
                   lin(
                     [
                       for (final x in semana)
-                        if (x.month == m)
-                          _Dia(
-                            key: ValueKey(
-                              '$qual-${dataIso(x)}-${x == escolhida}',
-                            ),
-                            dia: x,
-                            meu: x == escolhida,
-                            aoClicar: () {
-                              sel[qual] = x;
-                              campos[qual]!.text = dataBr(x);
-                              erros[qual] = null;
-                              d.atualizar();
-                            },
-                          )
-                        else
-                          const Ct(largura: 38, altura: 32),
+                        Expanded(
+                          child: x.month != m
+                              ? const SizedBox(height: 32)
+                              : _Dia(
+                                  key: ValueKey(
+                                    '$qual-${dataIso(x)}-${x == escolhida}',
+                                  ),
+                                  dia: x,
+                                  habilitado: dentroDoIntervalo(x),
+                                  meu: x == escolhida,
+                                  aoClicar: () {
+                                    sel[qual] = x;
+                                    campos[qual]!.text = dataBr(x);
+                                    erros[qual] = null;
+                                    d.atualizar();
+                                  },
+                                ),
+                        ),
                     ],
                     espaco: 2,
-                    idLayout: 'Grupo.periodo.lin.3',
+                    idLayout:
+                        'Grupo.periodo.lin.3.$qual.${dataIso(semana.first)}',
                   ),
                 // Sempre 6 linhas: mês de 4 ou 5 semanas não muda a altura da janela.
                 for (var i = semanas.length; i < 6; i++) const Ct(altura: 32),
               ],
               espaco: 2,
               justa: true,
-              idLayout: 'Grupo.periodo.col.3',
+              idLayout: 'Grupo.periodo.col.3.$qual',
             ),
           ],
           justa: true,
           espaco: 8,
-          idLayout: 'Grupo.periodo.col.2',
+          idLayout: 'Grupo.periodo.col.2.$qual',
         ),
       ],
       justa: true,
-      largura: 286,
-      idLayout: 'Grupo.periodo.col.1',
+      largura: larguraPainel,
+      idLayout: 'Grupo.periodo.col.1.$qual',
     );
   }
 
   d = Dialogo(
-    titulo: (_) => app.tituloComX('Período personalizado'),
-    largura: 613,
+    titulo: (_) => app.tituloComX(titulo),
+    largura: unica ? larguraPainel : larguraPeriodo,
     conteudo: (context) => col(
       [
-        lin(
-          [
-            painel('de', 'Data inicial'),
-            Ct(
-              largura: 1,
-              altura: 320,
-              cor: Theme.of(context).colorScheme.outlineVariant,
+        if (unica)
+          painel('de', rotuloInicial)
+        else
+          LayoutBuilder(
+            builder: (context, limites) {
+              final inicial = painel('de', rotuloInicial);
+              final final_ = painel('ate', 'Data final');
+              if (limites.maxWidth < larguraPeriodo) {
+                return col([inicial, final_], justa: true, espaco: 16);
+              }
+              return lin(
+                [
+                  inicial,
+                  Ct(
+                    largura: 1,
+                    altura: 320,
+                    cor: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                  final_,
+                ],
+                espaco: 20,
+                cruzado: CrossAxisAlignment.start,
+              );
+            },
+          ),
+        if (permitirReplicar)
+          Material(
+            type: MaterialType.transparency,
+            child: CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              mouseCursor: SystemMouseCursors.click,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('Replicar para as outras linhas'),
+              value: replicar,
+              onChanged: (v) {
+                replicar = v ?? false;
+                d.atualizar();
+              },
             ),
-            painel('ate', 'Data final'),
-          ],
-          espaco: 20,
-          cruzado: CrossAxisAlignment.start,
-          idLayout: 'Grupo.periodo.lin.4',
-        ),
-        Tx(
-          invertido() ? 'A data final é anterior à inicial.' : '',
-          tam: Letra.apoio,
-          cor: Colors.red.shade700,
-          largura: TamanhosPeriodo
-              .rotuloInvertidoADataFinalEAnteriorAInicial
-              .largura,
-          altura:
-              TamanhosPeriodo.rotuloInvertidoADataFinalEAnteriorAInicial.altura,
-          idLayout:
-              'TamanhosPeriodo.rotuloInvertidoADataFinalEAnteriorAInicial',
-        ),
+          ),
+        if (!unica)
+          Tx(
+            invertido() ? 'A data final é anterior à inicial.' : '',
+            tam: Letra.apoio,
+            cor: Colors.red.shade700,
+            largura: TamanhosPeriodo
+                .rotuloInvertidoADataFinalEAnteriorAInicial
+                .largura,
+            altura: TamanhosPeriodo
+                .rotuloInvertidoADataFinalEAnteriorAInicial
+                .altura,
+            idLayout:
+                'TamanhosPeriodo.rotuloInvertidoADataFinalEAnteriorAInicial',
+          ),
       ],
       justa: true,
       espaco: 6,
@@ -426,7 +530,7 @@ void abrirPeriodo(
       ),
     ],
     aoFechar: aoCancelar, // Cancelar, X e Esc passam por aqui
-    idLayout: 'Janela.periodo.Dialogo.1',
+    idLayout: idLayout,
   );
   for (final q in const ['de', 'ate']) {
     final ref = limitar(sel[q] ?? DateTime.now());

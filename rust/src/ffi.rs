@@ -44,6 +44,21 @@ fn responder(metodo: &str, args: &str, avisar: despacho::Avisar) -> Value {
     };
     // Um erro de programação numa chamada não pode derrubar o programa inteiro.
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        #[cfg(windows)]
+        if crate::dados_windows::cliente_instalado() && !crate::dados_windows::metodo_local(metodo) {
+            if matches!(metodo, "atualizacao.baixar" | "atualizacao.instalar") {
+                let permissao = crate::dados_windows::chamar(
+                    "dados.autorizar_atualizacao", &json!({"metodo":metodo}), &|_| {},
+                );
+                if permissao.get("erro").is_some() {
+                    return permissao;
+                }
+                return crate::despacho_diversos::executar(metodo, &args, avisar)
+                    .map(despacho::envelope)
+                    .unwrap_or_else(|| json!({"erro":{"tipo":"ValueError","msg":"Atualização inválida."}}));
+            }
+            return crate::dados_windows::chamar(metodo, &args, avisar);
+        }
         despacho::chamar_avisando(metodo, &args, avisar)
     })) {
         Ok(v) => v,
@@ -53,7 +68,7 @@ fn responder(metodo: &str, args: &str, avisar: despacho::Avisar) -> Value {
                 .cloned()
                 .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
                 .unwrap_or_else(|| "erro interno".into());
-            crate::registro::critico("nucleo", &format!("Falha interna em {metodo}: {msg}"));
+            eprintln!("Falha interna em {metodo}: {msg}");
             json!({ "erro": { "tipo": "RuntimeError", "msg": format!("Falha interna: {msg}") } })
         }
     }

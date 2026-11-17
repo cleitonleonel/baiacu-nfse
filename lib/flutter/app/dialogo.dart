@@ -25,6 +25,7 @@ class Dialogo extends ChangeNotifier {
     required this.conteudo,
     this.largura,
     this.acoes,
+    this.acaoEsquerda,
     this.alinhamentoAcoes = MainAxisAlignment.end,
     this.marcador,
     this.aoFechar,
@@ -40,6 +41,7 @@ class Dialogo extends ChangeNotifier {
   final double? largura;
   final String? idLayout;
   List<Widget> Function(BuildContext)? acoes;
+  final WidgetBuilder? acaoEsquerda;
   final MainAxisAlignment alinhamentoAcoes;
 
   /// "confirmar_emissao", "_modal_obrigatorio_", "novo_usuario", "_enter_fecha_"…
@@ -155,16 +157,28 @@ class CartaoDialogo extends StatelessWidget {
         ),
       );
       final acoes = d.acoes?.call(context) ?? const <Widget>[];
-      if (acoes.isNotEmpty) {
+      final esquerda = d.acaoEsquerda?.call(context);
+      if (esquerda != null || acoes.isNotEmpty) {
+        final direita = lin(
+          acoes,
+          espaco: 8,
+          quebra: true,
+          principal: d.alinhamentoAcoes,
+          idLayout: 'Grupo.dialogo.lin.2',
+        );
         filhos.add(
           comCalha(
-            lin(
-              acoes,
-              espaco: 8,
-              largura: larguraConteudo,
-              quebra: true,
-              principal: d.alinhamentoAcoes,
-              idLayout: 'Grupo.dialogo.lin.2',
+            SizedBox(
+              width: larguraConteudo,
+              child: esquerda == null
+                  ? direita
+                  : Row(
+                      spacing: 8,
+                      children: [
+                        esquerda,
+                        Expanded(child: direita),
+                      ],
+                    ),
             ),
           ),
         );

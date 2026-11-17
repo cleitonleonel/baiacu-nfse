@@ -27,6 +27,10 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 
 É **gratuito**, roda no **seu computador** e já está pronto para a **Reforma Tributária**.
 
+<p align="center">
+  <img src="docs/imagens/baiacu-em-dia.jpg" alt="O baiacu em dia com a Receita" width="100%">
+</p>
+
 ---
 
 ## 🚀 Como funciona
@@ -50,6 +54,14 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 - **Caiu a internet?** A nota fica guardada numa fila e você envia depois, sem perder nada e sem refazer.
 - **Errou?** Cancele ou substitua a nota pelo próprio programa.
 
+- **Escolha a data de competência** no calendário. A data de hoje vem preenchida.
+
+### 📦 Emitir em lote
+
+- Salve um modelo por prestador e marque serviços de vários clientes de uma vez.
+- Confirme o envio e acompanhe a situação de cada nota. O histórico permite corrigir pendências, retransmitir e consultar o número das notas emitidas.
+- Exporte o histórico em PDF, Excel ou CSV, com opção de incluir XMLs e DANFSe disponíveis no Cofre.
+
 ### 📇 Clientes e serviços organizados
 - Cadastre cada cliente **uma única vez**, junto com os serviços que você presta para ele.
 - **Busque o CNPJ e o CEP** pela internet para não digitar endereço na mão.
@@ -62,7 +74,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 
 ### 🗄️ Cofre de notas
 - Traz do **Ambiente Nacional da NFS-e** todas as notas em que a sua empresa aparece: as que você **emitiu** e as que outras empresas emitiram **para você**.
-- Procure qualquer nota por cliente, número, valor ou período.
+- Procure qualquer nota por cliente, número, valor ou período. Em **Consultar** e no **Cofre**, escolha **Emissão** ou **Competência** para filtrar e exportar por essa data.
 - Gere o **PDF da nota (DANFSe)** quando quiser e baixe o **XML** a qualquer momento.
 - Exporte para **Excel** ou para um **relatório em PDF**, pronto para mandar ao contador.
 
@@ -77,7 +89,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 - Faça **backup** de tudo em um arquivo e restaure quando precisar.
 
 ### 📊 Pronto para a Reforma Tributária
-- Já acompanha o novo leiaute da NFS-e com **IBS e CBS**.
+- Já acompanha o leiaute da NFS-e com **IBS e CBS** e os prazos por operação e regime tributário. [Ato Conjunto RFB/CGIBS nº 7/2026](https://www.gov.br/nfse/pt-br/noticias/cgnfs-e-informa-ato-conjunto-rfb-cgibs-no-7-2026-atualiza-o-cronograma-de-obrigatoriedade-de-emissao-da-nfs-e-para-ibs-e-cbs/)
 - Já traz as novas regras para **locação de imóveis**, com vencimento mensal calculado automaticamente.
 
 ### 🎨 Do seu jeito
@@ -159,7 +171,7 @@ O programa procura versão nova sozinho, uma vez por dia. Quando houver, aparece
 <details>
 <summary><b>Várias pessoas usam o mesmo computador. Funciona?</b></summary>
 <br>
-Funciona. O programa fica protegido em Program Files, com bancos compartilhados em ProgramData. O uso normal e as atualizações pelo serviço não pedem administrador; instalar, reparar um serviço ausente/desativado ou recuperar uma atualização interrompida pode exigir elevação. Cada pessoa entra com o próprio login no programa, com o nível de acesso dela. Para proteger os dados, ele só fica aberto por uma pessoa de cada vez naquele computador.
+Funciona. O programa fica protegido em Program Files, com bancos compartilhados em ProgramData. Desde a versão 1.0.0.3, o serviço **Baiacu NFSe - Dados** abre os bancos sob uma conta virtual própria. Para migrar uma instalação existente pela primeira vez, use o instalador 1.0.0.3. A edição portátil guarda os bancos junto do programa. O uso normal e as atualizações pelo serviço não pedem administrador; instalar, reparar um serviço ausente/desativado ou recuperar uma atualização interrompida pode exigir elevação. Cada pessoa entra com o próprio login no programa, com o nível de acesso dela. Para proteger os dados, ele só fica aberto por uma pessoa de cada vez naquele computador.
 </details>
 
 <details>

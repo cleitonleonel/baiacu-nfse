@@ -8,6 +8,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../editor_layout.dart';
 import '../estilo.dart' show Medida;
@@ -22,6 +23,7 @@ class CampoTexto extends StatefulWidget {
     required this.controle,
     this.rotulo,
     this.rotuloNaBorda,
+    this.dicaRotulo = true,
     this.largura,
     this.altura,
     this.compacto = false,
@@ -38,6 +40,7 @@ class CampoTexto extends StatefulWidget {
     this.mascara,
     this.aoMudar,
     this.aoEnviar,
+    this.aoTocar,
     this.foco,
     this.alinhamento = TextAlign.start,
     this.estilo,
@@ -62,6 +65,7 @@ class CampoTexto extends StatefulWidget {
   final TextEditingController controle;
   final String? rotulo;
   final String? rotuloNaBorda;
+  final bool dicaRotulo;
   final double? largura;
   final double? altura;
 
@@ -82,6 +86,7 @@ class CampoTexto extends StatefulWidget {
   final String Function(String texto)? mascara;
   final ValueChanged<String>? aoMudar;
   final ValueChanged<String>? aoEnviar;
+  final VoidCallback? aoTocar;
   final FocusNode? foco;
   final TextAlign alinhamento;
   final TextStyle? estilo;
@@ -114,6 +119,30 @@ class CampoTexto extends StatefulWidget {
 
 class _CampoTextoState extends State<CampoTexto> {
   bool _revelada = false;
+  bool _capsLock = HardwareKeyboard.instance.lockModesEnabled.contains(
+    KeyboardLockMode.capsLock,
+  );
+
+  bool _teclaSenha(KeyEvent event) {
+    final ativo = HardwareKeyboard.instance.lockModesEnabled.contains(
+      KeyboardLockMode.capsLock,
+    );
+    if (mounted && ativo != _capsLock) {
+      if (widget.senha) {
+        setState(() => _capsLock = ativo);
+      } else {
+        _capsLock = ativo;
+      }
+    }
+    return false;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_teclaSenha);
+  }
+
   FocusNode? _focoProprio;
 
   FocusNode get _foco => widget.foco ?? (_focoProprio ??= FocusNode());
@@ -148,6 +177,7 @@ class _CampoTextoState extends State<CampoTexto> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_teclaSenha);
     _ouvido?.removeListener(_focoMudou);
     _focoProprio?.dispose();
     super.dispose();
@@ -174,6 +204,7 @@ class _CampoTextoState extends State<CampoTexto> {
     _ouvir();
     final ajuste = ajusteLayout(context, widget.idLayout);
     final inerte = widget.desabilitado || travado(context);
+    final clicavel = widget.aoTocar != null;
     final InputBorder contorno = widget.emTabela
         ? InputBorder.none
         : ContornoCampo(densidade: MediaQuery.devicePixelRatioOf(context));
@@ -205,6 +236,30 @@ class _CampoTextoState extends State<CampoTexto> {
         ? widget.altura ?? Medida.controleDePagina
         : Medida.campo;
     final preencherAltura = varias && altura != null;
+    final temRotulo =
+        !widget.emTabela &&
+        !ajuste.oculto &&
+        (widget.rotulo != null || ajuste.texto != null);
+    Widget? rotulo;
+    if (temRotulo) {
+      final texto = ajuste.exibir(widget.rotulo ?? '');
+      rotulo = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              widget.rotuloNaBorda != null &&
+                      (_foco.hasFocus || widget.controle.text.isNotEmpty)
+                  ? widget.rotuloNaBorda!
+                  : texto,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      );
+      if (widget.dicaRotulo) rotulo = Tooltip(message: texto, child: rotulo);
+    }
     Widget campo = TextFormField(
       controller: widget.controle,
       focusNode: _foco,
@@ -212,6 +267,10 @@ class _CampoTextoState extends State<CampoTexto> {
       autofocus: widget.focoInicial,
       enabled: !inerte,
       readOnly: widget.somenteLeitura,
+      onTap: inerte ? null : widget.aoTocar,
+      mouseCursor: clicavel && !inerte ? SystemMouseCursors.click : null,
+      showCursor: clicavel && widget.somenteLeitura ? false : null,
+      enableInteractiveSelection: !(clicavel && widget.somenteLeitura),
       obscureText: widget.senha && !_revelada,
       obscuringCharacter: '•',
       textAlign: ajuste.alinhamento ?? widget.alinhamento,
@@ -243,22 +302,7 @@ class _CampoTextoState extends State<CampoTexto> {
                 ? const EdgeInsets.symmetric(horizontal: 6, vertical: 8)
                 : null),
         isDense: widget.denso,
-        label:
-            widget.emTabela ||
-                ajuste.oculto ||
-                (widget.rotulo == null && ajuste.texto == null)
-            ? null
-            : Tooltip(
-                message: ajuste.exibir(widget.rotulo ?? ''),
-                child: Text(
-                  widget.rotuloNaBorda != null &&
-                          (_foco.hasFocus || widget.controle.text.isNotEmpty)
-                      ? widget.rotuloNaBorda!
-                      : ajuste.exibir(widget.rotulo ?? ''),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
+        label: rotulo,
         labelStyle: PadraoControles.rotulo.copyWith(
           color: widget.estiloRotulo?.color,
         ),
@@ -279,10 +323,39 @@ class _CampoTextoState extends State<CampoTexto> {
         errorText: widget.erro,
         prefixText: widget.prefixo,
         prefixIcon: widget.iconePrefixo,
-        suffixIcon: widget.sufixo ?? olho,
+        suffixIcon:
+            widget.sufixo ??
+            (olho == null
+                ? null
+                : Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: olho,
+                  )),
         suffix: widget.textoSufixo,
       ),
     );
+    if (widget.senha) {
+      campo = Stack(
+        clipBehavior: Clip.none,
+        children: [
+          campo,
+          Positioned(
+            right: -20,
+            top: 0,
+            width: 20,
+            height: Medida.campo,
+            child: Center(
+              child: _capsLock
+                  ? const Tooltip(
+                      message: 'Caps Lock ativado',
+                      child: Icon(Icons.circle, size: 7, color: Colors.orange),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ),
+        ],
+      );
+    }
     if (widget.expandir && ajuste.largura == null) {
       return alvoLayout(
         context,

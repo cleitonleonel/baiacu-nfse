@@ -21,6 +21,7 @@ import '../app/sistema.dart' show abrirEndereco;
 import '../editor/editor_rico.dart';
 import '../kit/arquivos.dart';
 import '../kit/campo.dart';
+import '../kit/contorno_campo.dart' show PadraoControles;
 import '../kit/flet.dart';
 import '../kit/formatos.dart';
 import '../kit/tamanhos_arquivo.dart';
@@ -165,6 +166,7 @@ class ConfigState extends State<TelaConfig> {
   late _CartaoProtecao _protecao;
   late _CartaoSenhaMestra _senhaMestra;
   late _CartaoSincronizacao _sincronizacao;
+  late _CartaoEmissao _emissao;
   late _CartaoAtualizacao _atualizacao;
   late _CartaoApoio _apoio;
 
@@ -211,6 +213,7 @@ class ConfigState extends State<TelaConfig> {
     _protecao = _CartaoProtecao(this);
     _senhaMestra = _CartaoSenhaMestra(this);
     _sincronizacao = _CartaoSincronizacao(this);
+    _emissao = _CartaoEmissao(this);
     _prestador = tem ? _CartaoPrestador(this) : null;
     _tributos = tem ? _CartaoTributos(this) : null;
     _certificados = tem ? _cartoesDeCertificado() : const [];
@@ -226,6 +229,7 @@ class ConfigState extends State<TelaConfig> {
       _protecao,
       _senhaMestra,
       _sincronizacao,
+      _emissao,
       ?_prestador,
       ?_tributos,
       ..._certificados,
@@ -416,7 +420,8 @@ class ConfigState extends State<TelaConfig> {
             altura: TamanhosConfiguracoes
                 .rotuloOPrestadorFormatarDocumentoDocETUDOOQue
                 .altura,
-            idLayout: 'TamanhosConfiguracoes.rotuloOPrestadorFormatarDocumentoDocETUDOOQue',
+            idLayout:
+                'TamanhosConfiguracoes.rotuloOPrestadorFormatarDocumentoDocETUDOOQue',
           ),
           Tx(
             'Isto não pode ser desfeito.',
@@ -475,7 +480,8 @@ class ConfigState extends State<TelaConfig> {
             altura: TamanhosConfiguracoes
                 .rotuloVoceVaiApagarPERMANENTEMENTEOPrestadorFormatarDocumentoDoc
                 .altura,
-            idLayout: 'TamanhosConfiguracoes.rotuloVoceVaiApagarPERMANENTEMENTEOPrestadorFormatarDocumentoDoc',
+            idLayout:
+                'TamanhosConfiguracoes.rotuloVoceVaiApagarPERMANENTEMENTEOPrestadorFormatarDocumentoDoc',
           ),
           CampoTexto(
             controle: campo,
@@ -548,7 +554,7 @@ class ConfigState extends State<TelaConfig> {
         secundaria: true,
         inicial: tem ? 0 : 2,
         // Sem prestador, do Avançado só o Backup (é onde se restaura um backup numa instalação nova).
-        desabilitadas: tem ? const {} : const {0, 1, 3},
+        desabilitadas: tem ? const {} : const {0, 1, 3, 5},
         aoMudar: aoMudar,
         rotulos: const [
           ('E-mail', Icons.email_outlined),
@@ -556,6 +562,7 @@ class ConfigState extends State<TelaConfig> {
           ('Backup', Icons.backup_outlined),
           ('Cofre', Icons.lock_outlined),
           ('Atualizações', Icons.system_update_alt),
+          ('Emissão', Icons.send_outlined),
         ],
         paineis: [
           tem ? painel([_email!]) : const Ct(),
@@ -563,6 +570,7 @@ class ConfigState extends State<TelaConfig> {
           painel([_banco, _protecao, _senhaMestra]),
           painel([_sincronizacao]),
           painel([_atualizacao]),
+          painel([_emissao]),
         ],
       ),
     );
@@ -1557,7 +1565,8 @@ class _CartaoCertificado extends _Cartao {
             altura: TamanhosConfiguracoes
                 .rotuloDocumentoFormatarDocumentoInfoDocumentoAsString
                 .altura,
-            idLayout: 'TamanhosConfiguracoes.rotuloDocumentoFormatarDocumentoInfoDocumentoAsString',
+            idLayout:
+                'TamanhosConfiguracoes.rotuloDocumentoFormatarDocumentoInfoDocumentoAsString',
           ),
           lin(
             [
@@ -1602,7 +1611,8 @@ class _CartaoCertificado extends _Cartao {
         altura: TamanhosConfiguracoes
             .rotuloCertificadoCertNomePfxPresenteMasASenhaNao
             .altura,
-        idLayout: 'TamanhosConfiguracoes.rotuloCertificadoCertNomePfxPresenteMasASenhaNao',
+        idLayout:
+            'TamanhosConfiguracoes.rotuloCertificadoCertNomePfxPresenteMasASenhaNao',
       );
     }
     return Tx(
@@ -2115,7 +2125,8 @@ class _CartaoEmail extends _Cartao {
             altura: TamanhosConfiguracoes
                 .botaoHtmlVisivelOcultarCodigoHTMLMostrarCodigoHTML
                 .altura,
-            idLayout: 'TamanhosConfiguracoes.botaoHtmlVisivelOcultarCodigoHTMLMostrarCodigoHTML',
+            idLayout:
+                'TamanhosConfiguracoes.botaoHtmlVisivelOcultarCodigoHTMLMostrarCodigoHTML',
           ),
           if (_htmlVisivel)
             Ct(
@@ -2338,7 +2349,8 @@ class _CartaoAmbiente extends _Cartao {
         altura: TamanhosConfiguracoes
             .rotuloAlterarANumeracaoPodeCausarRejeicaoPorDuplicidade
             .altura,
-        idLayout: 'TamanhosConfiguracoes.rotuloAlterarANumeracaoPodeCausarRejeicaoPorDuplicidade',
+        idLayout:
+            'TamanhosConfiguracoes.rotuloAlterarANumeracaoPodeCausarRejeicaoPorDuplicidade',
       ),
       lin([
         if (t)
@@ -2367,6 +2379,167 @@ class _CartaoAmbiente extends _Cartao {
 }
 
 // ------------------------------------------------------------------------------------------- //
+// Avançado › Emissão
+class _CartaoEmissao extends _Cartao {
+  _CartaoEmissao(super.pai) {
+    final cfg = jaMapa('lotes.config_aviso');
+    _ativo = cfg['ativo'] as bool;
+    _quantidade = cfg['quantidade'] as int;
+    _unidade = cfg['unidade'] as String;
+    _definirPeriodo(cfg['periodo'] as String);
+    _edicao = _Edicao(
+      this,
+      permissao: 'config.emissao',
+      titulo: 'Emissão em lote',
+      valores: [
+        _Valor(() => _ativo, (v) => _ativo = v as bool),
+        _Valor(() => _ultimoPeriodo, (v) => _definirPeriodo(v as String)),
+        _Valor(() => _quantidade, (v) => _quantidade = v as int),
+        _Valor(() => _unidade, (v) => _unidade = v as String),
+      ],
+      salvar: () {
+        try {
+          ja<Object?>('lotes.salvar_aviso', {
+            'config': {
+              'ativo': _ativo,
+              'periodo': _ultimoPeriodo,
+              'quantidade': _quantidade,
+              'unidade': _unidade,
+            },
+          });
+          app.toast('Configuração de emissão em lote salva.');
+          return true;
+        } catch (e) {
+          app.toast('$e', erro: true);
+          return false;
+        }
+      },
+    );
+  }
+
+  final _periodo = Suspensa();
+  static const _unidades = {
+    'hora': ('Hora', 'horas'),
+    'dia': ('Dia', 'dias'),
+    'semana': ('Semana', 'semanas'),
+    'mes': ('Mês', 'meses'),
+  };
+  late bool _ativo;
+  late int _quantidade;
+  late String _unidade;
+  late String _ultimoPeriodo;
+  late final _Edicao _edicao;
+
+  @override
+  void descartar() {
+    _periodo.dispose();
+    super.descartar();
+  }
+
+  void _definirPeriodo(String valor) {
+    final (singular, plural) = _unidades[_unidade]!;
+    final intervalo =
+        '$_quantidade ${_quantidade == 1 ? singular.toLowerCase() : plural}';
+    _ultimoPeriodo = valor;
+    _periodo.opcoes = [
+      const Opcao('dia', '1 dia'),
+      const Opcao('semana', '1 semana'),
+      const Opcao('mes', '1 mês'),
+      valor == 'custom'
+          ? Opcao('custom', intervalo, naLista: 'Personalizado · $intervalo')
+          : const Opcao('custom', 'Personalizado'),
+    ];
+    _periodo.por(valor);
+    _periodo.avisar();
+  }
+
+  void _personalizar() {
+    late final Dialogo d;
+    late final TextEditingController quantidade;
+    late final Suspensa unidade;
+    d = Dialogo(
+      titulo: (_) => textoTitulo('Intervalo personalizado'),
+      largura: 340,
+      conteudo: (_) => lin([
+        CampoTexto(
+          controle: quantidade,
+          rotulo: 'Quantidade',
+          largura: 115,
+          maximo: 2,
+          ocultarContador: true,
+          mascara: soDigitos,
+          aoMudar: (_) => d.atualizar(),
+        ),
+        ListaSuspensa(
+          estado: unidade,
+          rotulo: 'Unidade',
+          largura: 165,
+          buscar: false,
+        ),
+      ], quebra: true),
+      acoes: (_) => [
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
+        Botao(
+          'Confirmar',
+          desabilitado: (int.tryParse(quantidade.text) ?? 0) < 1,
+          aoClicar: () {
+            if (!_edicao.travado) {
+              _quantidade = int.parse(quantidade.text);
+              _unidade = unidade.valor!;
+              _definirPeriodo('custom');
+              redesenhar();
+            }
+            app.fecharEsta(d);
+          },
+        ),
+      ],
+    );
+    quantidade = d.texto('$_quantidade');
+    unidade = d.suspensa(
+      valor: _unidade,
+      opcoes: [for (final u in _unidades.entries) Opcao(u.key, u.value.$1)],
+    );
+    app.mostrarDialogo(d);
+  }
+
+  @override
+  Widget construir(BuildContext context) => _moldura([
+    _tituloCartao('Emissão em lote'),
+    Marcar(
+      rente: true,
+      valor: _ativo,
+      filhoRotulo: const Flexible(
+        child: Text(
+          'Alertar e solicitar confirmação quando um mesmo lote já foi transmitido no intervalo de',
+          style: PadraoControles.rotulo,
+        ),
+      ),
+      desabilitado: _edicao.travado,
+      aoMudar: (v) {
+        _ativo = v == true;
+        redesenhar();
+      },
+    ),
+    ListaSuspensa(
+      estado: _periodo,
+      rotulo: 'Intervalo',
+      largura: 190,
+      desabilitado: _edicao.travado || !_ativo,
+      buscar: false,
+      aoSelecionar: (v) {
+        if (v == 'custom') {
+          _definirPeriodo(_ultimoPeriodo);
+          _personalizar();
+        } else if (v != null) {
+          _definirPeriodo(v);
+        }
+        redesenhar();
+      },
+    ),
+    lin(_edicao.botoes()),
+  ]);
+}
+
 // Avançado › Cofre: sincronização
 // ------------------------------------------------------------------------------------------- //
 class _CartaoSincronizacao extends _Cartao {
@@ -3393,8 +3566,9 @@ class _CartaoBanco extends _Cartao {
         app.backupEmAndamento = false;
         redesenhar();
       }
-      final oQue = [for (final p in r['partes'] as List) _rotulo[p] ?? '$p']
-          .join(' e ');
+      final oQue = [
+        for (final p in r['partes'] as List) _rotulo[p] ?? '$p',
+      ].join(' e ');
       final extra = r['sem_notas'] == true
           ? ' O banco de notas ainda não existe: saíram só os dados.'
           : '';
@@ -3467,7 +3641,8 @@ class _CartaoBanco extends _Cartao {
             altura: TamanhosConfiguracoes
                 .rotuloEsteBackupFoiCifradoComOutraChaveOutra
                 .altura,
-            idLayout: 'TamanhosConfiguracoes.rotuloEsteBackupFoiCifradoComOutraChaveOutra',
+            idLayout:
+                'TamanhosConfiguracoes.rotuloEsteBackupFoiCifradoComOutraChaveOutra',
           ),
           CampoTexto(
             controle: senha,
@@ -3651,7 +3826,8 @@ class _CartaoBanco extends _Cartao {
             altura: TamanhosConfiguracoes
                 .rotuloIstoSUBSTITUIOQueEstaNestaInstalacaoPelo
                 .altura,
-            idLayout: 'TamanhosConfiguracoes.rotuloIstoSUBSTITUIOQueEstaNestaInstalacaoPelo',
+            idLayout:
+                'TamanhosConfiguracoes.rotuloIstoSUBSTITUIOQueEstaNestaInstalacaoPelo',
           ),
           Tx(
             origem,
@@ -3699,7 +3875,8 @@ class _CartaoBanco extends _Cartao {
             altura: TamanhosConfiguracoes
                 .rotuloEmSeguidaOAplicativoReiniciaSozinho
                 .altura,
-            idLayout: 'TamanhosConfiguracoes.rotuloEmSeguidaOAplicativoReiniciaSozinho',
+            idLayout:
+                'TamanhosConfiguracoes.rotuloEmSeguidaOAplicativoReiniciaSozinho',
           ),
         ],
         justa: true,
@@ -3781,7 +3958,8 @@ class _CartaoBanco extends _Cartao {
             altura: TamanhosConfiguracoes
                 .rotuloAnoteEstaSenhaEGuardeFORADoComputador
                 .altura,
-            idLayout: 'TamanhosConfiguracoes.rotuloAnoteEstaSenhaEGuardeFORADoComputador',
+            idLayout:
+                'TamanhosConfiguracoes.rotuloAnoteEstaSenhaEGuardeFORADoComputador',
           ),
           lin(
             [
@@ -3831,7 +4009,8 @@ class _CartaoBanco extends _Cartao {
             altura: TamanhosConfiguracoes
                 .rotuloAoConfirmarASenhaMestraAtualDeixaDe
                 .altura,
-            idLayout: 'TamanhosConfiguracoes.rotuloAoConfirmarASenhaMestraAtualDeixaDe',
+            idLayout:
+                'TamanhosConfiguracoes.rotuloAoConfirmarASenhaMestraAtualDeixaDe',
           ),
         ],
         justa: true,
@@ -3992,7 +4171,8 @@ class _CartaoAtualizacao extends _Cartao {
       ),
       Marcar(
         valor: _e['automatica'] != false,
-        rotulo: 'Procurar versão nova sozinho ao abrir o programa (uma vez por dia)',
+        rotulo:
+            'Procurar versão nova sozinho ao abrir o programa (uma vez por dia)',
         rente: true,
         aoMudar: (v) => _automatica(v == true),
         idLayout: 'TamanhosConfiguracoes.marcarAtualizacaoAutomatica',

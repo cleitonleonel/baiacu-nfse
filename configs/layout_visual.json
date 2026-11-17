@@ -256,12 +256,7 @@
       "oculto": false
     },
     "Grupo.registros.lin.4": {},
-    "Grupo.config.lin.25": {
-      "ordem": [
-        "Grupo.config.lin.25.item.Checkbox.config.3",
-        "Grupo.config.lin.25.item.TamanhosConfiguracoes.campoIntervalo"
-      ]
-    },
+    "Grupo.config.lin.25": {},
     "Grupo.config.col.1": {},
     "Grupo.config.lin.24": {},
     "TamanhosConfiguracoes.rotuloT2:Quais ambientes o Cofre consulta no ADN — vale para o botão Sincronizar e para a sincronização automática.": {
@@ -342,6 +337,154 @@
     "TamanhosConsultar.rotuloRotulo2:Ações": {
       "tamanhoFonte": 13.0,
       "negrito": true
+    },
+    "Lotes.titulo": {
+      "tamanhoFonte": 18.0
+    },
+    "HistoricoLotes.titulo": {
+      "tamanhoFonte": 18.0
+    },
+    "Lotes.cabecalho.cliente": {
+      "tamanhoFonte": 13.0,
+      "negrito": true,
+      "alinhamento": "left"
+    },
+    "Lotes.cabecalho.servico": {
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    },
+    "Lotes.cabecalho.vServ": {
+      "tamanhoFonte": 13.0,
+      "negrito": true,
+      "texto": "Valor serviço",
+      "oculto": false
+    },
+    "Lotes.cabecalho.vDescCond": {
+      "tamanhoFonte": 13.0,
+      "negrito": true,
+      "texto": "Desc. condic.",
+      "oculto": false
+    },
+    "Lotes.cabecalho.vDescIncond": {
+      "tamanhoFonte": 13.0,
+      "negrito": true,
+      "texto": "Desc. incondic.",
+      "oculto": false
+    },
+    "Lotes.cabecalho.competencia": {
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    },
+    "Lotes.cabecalho.acoes": {
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    },
+    "HistoricoLotes.cabecalho.Cliente": {
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    },
+    "HistoricoLotes.cabecalho.Serviço": {
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    },
+    "HistoricoLotes.cabecalho.Competência": {
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    },
+    "HistoricoLotes.cabecalho.Número": {
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    },
+    "HistoricoLotes.cabecalho.Valor serviço": {
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    },
+    "HistoricoLotes.cabecalho.Situação": {
+      "tamanhoFonte": 13.0,
+      "negrito": true
+    },
+    "HistoricoLotes.cabecalho.Ações": {
+      "tamanhoFonte": 13.0,
+      "negrito": true,
+      "alinhamento": "center"
+    },
+    "TamanhosConsultar.rotuloRotulo2:Competência": {
+      "tamanhoFonte": 13.0,
+      "negrito": true,
+      "alinhamento": "left"
+    },
+    "Grupo.lotes.rodape": {
+      "ordem": [
+        "Grupo.lotes.rodape.item.Lotes.adicionar",
+        "Grupo.lotes.rodape.item.Lotes.salvarEditar",
+        "Grupo.lotes.rodape.item.3",
+        "Grupo.lotes.rodape.item.Lotes.cancelar"
+      ]
+    },
+    "Lotes.coluna.cliente": {
+      "largura": 450.0
+    },
+    "Lotes.coluna.vServ": {
+      "largura": 120.0,
+      "altura": 40.0
+    },
+    "Lotes.coluna.vDescCond": {
+      "largura": 120.0
+    },
+    "Lotes.coluna.vDescIncond": {
+      "largura": 120.0
+    },
+    "Lotes.coluna.competencia": {
+      "largura": 120.0
+    },
+    "Lotes.coluna.acoes": {
+      "largura": 150.0
+    },
+    "Emitir.competencia": {
+      "largura": 170.0
+    },
+    "Lotes.valor.competencia": {
+      "altura": 32.0
+    },
+    "Consultar.filtrarPor": {
+      "largura": 165.0,
+      "texto": "Data",
+      "oculto": false
+    },
+    "TamanhosCofre.campoTipo2": {
+      "largura": 140.0
+    },
+    "Cofre.filtrarPor": {
+      "largura": 165.0,
+      "texto": "Data",
+      "oculto": false
+    },
+    "HistoricoLotes.coluna.Cliente": {
+      "largura": 432.00000000000034
+    },
+    "HistoricoLotes.coluna.Valor serviço": {
+      "largura": 97.0
+    },
+    "HistoricoLotes.coluna.Situação": {
+      "largura": 115.59999999999945
+    },
+    "HistoricoLotes.painel.registro": {
+      "largura": 1146.83984375
+    },
+    "HistoricoLotes.painel.lista": {
+      "largura": 233.60000000000014
+    },
+    "HistoricoLotes.coluna.Competência": {
+      "largura": 98.0
+    },
+    "HistoricoLotes.coluna.Ações": {
+      "largura": 136.4000000000001
+    },
+    "HistoricoLotes.coluna.Serviço": {
+      "largura": 127.0
+    },
+    "Lotes.adicionar.painelClientes": {
+      "largura": 453.59999999999985
     }
   }
 }

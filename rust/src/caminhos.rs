@@ -9,6 +9,13 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::RwLock;
 
+static PROGRAMA: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+#[cfg(windows)]
+pub(crate) fn definir_programa(pasta: PathBuf) {
+    let _ = PROGRAMA.set(pasta);
+}
+
 static RAIZ: RwLock<Option<PathBuf>> = RwLock::new(None);
 
 /// Define a raiz. Chamar uma vez, antes de qualquer outra coisa do núcleo.
@@ -39,6 +46,9 @@ pub fn recurso(partes: &[&str]) -> PathBuf {
 
 /// Recursos ficam junto do executável instalado; no desenvolvimento, na raiz informada.
 pub fn programa() -> PathBuf {
+    if let Some(pasta) = PROGRAMA.get() {
+        return pasta.clone();
+    }
     let exe = std::env::current_exe().unwrap_or_default();
     if exe.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("Baiacu NFS-e.exe")) {
         exe.parent().unwrap_or(Path::new(".")).to_path_buf()
@@ -96,4 +106,22 @@ pub fn absoluto(caminho: &str) -> PathBuf {
     } else {
         raiz().join(p)
     }
+}
+
+/// Executa operações em arquivos escolhidos pelo operador com a identidade dele.
+pub(crate) fn arquivo_usuario<T, E: From<std::io::Error>>(
+    acao: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    #[cfg(windows)]
+    return crate::dados_windows::arquivo_usuario(acao);
+    #[cfg(not(windows))]
+    acao()
+}
+
+pub(crate) fn temporarios_usuario() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(pasta) = crate::dados_windows::temporarios_usuario() {
+        return pasta;
+    }
+    std::env::temp_dir()
 }

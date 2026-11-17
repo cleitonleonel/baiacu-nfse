@@ -43,6 +43,7 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> janela_;
   UINT mensagem_taskbar_criada_ = 0;
+  UINT mensagem_fechar_instalador_ = 0;
   bool na_bandeja_ = false;
 };
 

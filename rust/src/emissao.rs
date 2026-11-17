@@ -367,7 +367,7 @@ pub fn preview_emissao_com(
             &do_cadastro
         }
     };
-    let competencia = forcado(extra, "dps", "dCompet").and_then(parse_iso_date);
+    let competencia = competencia_validada(extra)?;
     let mut erros = form.validate(cadastro::rtc_required(
         prestador,
         form,
@@ -418,6 +418,11 @@ pub fn preview_emissao_com(
             )
         })?;
         let material = crate::certificado::carregar_pfx(&pfx, &senha)?;
+        let validade = crate::certificado::titular(&material.cert_der)?;
+        let agora = chrono::Utc::now().timestamp();
+        if !(validade.de..=validade.ate).contains(&agora) {
+            return Err(Erro::valor("O certificado está fora do período de validade."));
+        }
         let (assinado, _) = assinatura::assinar_dps(&montada.xml, &ns_nfse, &material)?;
         let bonito = xml::para_bytes_bonito(&xml::ler(&assinado)?);
         r["cert"] = json!(cert);
@@ -697,9 +702,8 @@ impl Andamento {
         Ok(r)
     }
 
-    /// Envia e CLASSIFICA a falha: sem conexão ou HTTP >= 500 vira pendência (reenviável — fila de
-    /// contingência); HTTP 4xx é REJEIÇÃO de negócio (não reenviar). Devolve o registro da
-    /// resposta apenas quando a transmissão teve HTTP 2xx.
+    /// Falhas de rede, HTTP 429 e respostas 5xx preservam a DPS para reenviar.
+    /// As demais respostas 4xx são tratadas como rejeições.
     fn enviar_ou_classificar(
         &mut self,
         payload_b64: &str,
@@ -731,8 +735,12 @@ impl Andamento {
         let status_txt = status
             .map(|s| s.to_string())
             .unwrap_or_else(|| "None".into());
-        if status.is_none_or(|s| s >= 500) {
-            let msg = format!("SEFIN indisponível (HTTP {status_txt}).");
+        if status.is_none_or(|s| s == 429 || s >= 500) {
+            let msg = if status == Some(429) {
+                "A SEFIN limitou as requisições (HTTP 429). Aguarde e tente novamente.".into()
+            } else {
+                format!("SEFIN indisponível (HTTP {status_txt}).")
+            };
             self.registro.evento(
                 "send",
                 "transmissão indisponível — DPS elegível para fila",
@@ -906,7 +914,7 @@ impl Andamento {
         Ok(r)
     }
 
-    fn rodar(&mut self) -> Res<Value> {
+    fn rodar(&mut self, preparar: Option<&dyn Fn(Pendencia) -> Res<Value>>) -> Res<Value> {
         self.registro.evento("run", "iniciando workflow", json!({}));
         // montar
         self.registro.evento(
@@ -955,6 +963,11 @@ impl Andamento {
             "xml assinado e assinatura conferida localmente",
             json!({ "idDps": id_assinado, "xmlsec_verify_ok": true, "signed_xml": "" }),
         );
+        if let Some(preparar) = preparar {
+            return preparar(self.pendencia(
+                &montada.n_dps, &montada.serie, &montada.id_dps, &assinado, None, "",
+            ));
+        }
         // payload
         self.registro.evento(
             "payload",
@@ -1109,6 +1122,16 @@ const SEM_CERTIFICADO: &str = "Certificado do prestador (ou a senha dele) não e
 /// Emite uma NFS-e para o serviço `servico` do cliente. `ambiente` define o tpAmb ("1" =
 /// produção, "2" = homologação). O certificado e a senha dele são lidos do banco; o serviço deve
 /// já estar salvo no cadastro do cliente. O XML autorizado vai para o banco de notas.
+/// Rejeita uma competência explícita inválida antes de numerar ou transmitir.
+fn competencia_validada(extra: &Forcados) -> Res<Option<chrono::NaiveDate>> {
+    let Some(valor) = forcado(extra, "dps", "dCompet") else { return Ok(None) };
+    let data = parse_iso_date(valor).ok_or_else(|| Erro::valor("Data de competência inválida."))?;
+    if data > chrono::Local::now().date_naive() {
+        return Err(Erro::valor("A competência não pode ser posterior à data de emissão."));
+    }
+    Ok(Some(data))
+}
+
 pub fn emitir(
     prestador: &str,
     tomador: &str,
@@ -1117,14 +1140,45 @@ pub fn emitir(
     ambiente: &str,
     extra: &Forcados,
 ) -> Res<Value> {
+    emitir_com(prestador, tomador, servico, cert, ambiente, extra, None)
+}
+
+pub(crate) fn validar_leiaute_transmissao(codigo: &str, ambiente: &str) -> Res<()> {
+    // Nota que só existe no leiaute novo, num ambiente em que a SEFIN ainda não o aceita: nada é
+    // numerado, assinado nem enviado.
+    if crate::leiaute::e_condominio(codigo) {
+        return Err(Erro::valor(
+            "Operações condominiais (99.05) ainda não foram liberadas no release 1 da NT 009. O cadastro permite prévia, mas não transmissão.",
+        ));
+    }
+    if crate::leiaute::so_no_novo(codigo)
+        && !crate::leiaute::transmissao_liberada(codigo, ambiente)
+    {
+        return Err(Erro::valor(crate::leiaute::recusa(ambiente)));
+    }
+    Ok(())
+}
+
+pub fn emitir_com(
+    prestador: &str, tomador: &str, servico: &str, cert: &str,
+    ambiente: &str, extra: &Forcados, form_lote: Option<&cadastro::ServicoForm>,
+) -> Res<Value> {
+    emitir_com_preparo(prestador, tomador, servico, cert, ambiente, extra, form_lote, None)
+}
+
+pub(crate) fn emitir_com_preparo(
+    prestador: &str, tomador: &str, servico: &str, cert: &str,
+    ambiente: &str, extra: &Forcados, form_lote: Option<&cadastro::ServicoForm>,
+    preparar: Option<&dyn Fn(Pendencia) -> Res<Value>>,
+) -> Res<Value> {
     if cadastro::ambiente_rotulo(ambiente).is_none() {
         return Err(Erro::valor(format!(
             "Ambiente inválido: {}. Use '1' (produção) ou '2' (homologação).",
             pyfmt::repr(ambiente)
         )));
     }
-    let form = cadastro::get_servico(prestador, tomador, servico)?;
-    let competencia = forcado(extra, "dps", "dCompet").and_then(parse_iso_date);
+    let form = match form_lote { Some(f) => f.clone(), None => cadastro::get_servico(prestador, tomador, servico)? };
+    let competencia = competencia_validada(extra)?;
     let mut erros = form.validate(cadastro::rtc_required(
         prestador,
         &form,
@@ -1138,18 +1192,7 @@ pub fn emitir(
             erros.join("\n- ")
         )));
     }
-    // Nota que só existe no leiaute novo, num ambiente em que a SEFIN ainda não o aceita: nada é
-    // numerado, assinado nem enviado.
-    if crate::leiaute::e_condominio(&form.cTribNac) {
-        return Err(Erro::valor(
-            "Operações condominiais (99.05) ainda não foram liberadas no release 1 da NT 009. O cadastro permite prévia, mas não transmissão.",
-        ));
-    }
-    if crate::leiaute::so_no_novo(&form.cTribNac)
-        && !crate::leiaute::transmissao_liberada(&form.cTribNac, ambiente)
-    {
-        return Err(Erro::valor(crate::leiaute::recusa(ambiente)));
-    }
+    validar_leiaute_transmissao(&form.cTribNac, ambiente)?;
     // O certificado sai do serviço (o próprio ou o de um procurador), não da tela.
     let escolhido = cadastro::cert_da_emissao(prestador, &form)?;
     if escolhido.is_empty() || aparar(cert).is_empty() {
@@ -1176,7 +1219,7 @@ pub fn emitir(
     let _trava = travar();
     let last_dps = cadastro::ensure_last_dps(prestador, ambiente)?;
     let (config_texto, cfg) =
-        match config_final_e_texto(prestador, tomador, servico, None, ambiente, extra) {
+        match config_final_e_texto(prestador, tomador, servico, Some(&form), ambiente, extra) {
             Ok(x) => x,
             // Falta um dado de cadastro; nada foi montado nem enviado. Sai como falha comum de
             // emissão (mensagem limpa), não como "erro inesperado".
@@ -1202,7 +1245,8 @@ pub fn emitir(
         numero_atual: None,
         recuperada_e0014: false,
     };
-    match a.rodar() {
+    match a.rodar(preparar) {
+        Ok(resultado) if preparar.is_some() => Ok(resultado),
         Ok(mut resultado) => {
             let info = json!({
                 "prestador": aparar(prestador),
@@ -1283,11 +1327,11 @@ fn meta_de(p: &PendenteInfo) -> String {
     )
 }
 
-fn gravar_meta(prestador: &str, p: &PendenteInfo) -> Res<()> {
+fn gravar_meta(prestador: &str, p: &PendenteInfo, situacao: &str) -> Res<()> {
     let con = banco::conn()?;
     con.execute(
-        "UPDATE pendente SET meta=?1 WHERE prestador=?2 AND id=?3 AND situacao='fila'",
-        params![meta_de(p), prestador, p.id],
+        "UPDATE pendente SET meta=?1 WHERE prestador=?2 AND id=?3 AND situacao=?4",
+        params![meta_de(p), prestador, p.id, situacao],
     )?;
     Ok(())
 }
@@ -1329,6 +1373,21 @@ pub fn enqueue_pendente(
     exc: &Pendencia,
     subst: &Value,
 ) -> Res<PendenteInfo> {
+    let (p, assinado) = preparar_pendente(prestador, tomador, servico, tomador_nome, valor, exc, subst)?;
+    gravar_pendente(prestador, &p.id, "fila", &meta_de(&p), &assinado, &exc.shadow_config)?;
+    // Reserva a numeração (nunca regride).
+    let caminho = cadastro::ensure_last_dps(prestador, &exc.tp_amb)?;
+    let n = numero_da_dps(&p.n_dps)?;
+    if n > cadastro::get_last_dps(prestador, Some(&exc.tp_amb))? {
+        banco::set_contador(&caminho, n)?;
+    }
+    Ok(p)
+}
+
+pub(crate) fn preparar_pendente(
+    prestador: &str, tomador: &str, servico: &str, tomador_nome: &str,
+    valor: &str, exc: &Pendencia, subst: &Value,
+) -> Res<(PendenteInfo, Vec<u8>)> {
     let assinado = STANDARD
         .decode(exc.signed_xml.as_bytes())
         .unwrap_or_default();
@@ -1366,20 +1425,7 @@ pub fn enqueue_pendente(
         subst_xmotivo: campo("xMotivo"),
         cert: exc.cert.clone(),
     };
-    gravar_pendente(
-        prestador,
-        &id,
-        "fila",
-        &meta_de(&p),
-        &assinado,
-        &exc.shadow_config,
-    )?;
-    // Reserva a numeração (nunca regride).
-    let caminho = cadastro::ensure_last_dps(prestador, &exc.tp_amb)?;
-    if n > cadastro::get_last_dps(prestador, Some(&exc.tp_amb))? {
-        banco::set_contador(&caminho, n)?;
-    }
-    Ok(p)
+    Ok((p, assinado))
 }
 
 /// Guarda a DPS ASSINADA que o usuário optou por descartar — FORA da fila (não é reenviada, o
@@ -1419,15 +1465,19 @@ pub fn arquivar_dps_descartada(
 }
 
 pub fn list_pendentes(prestador: &str) -> Res<Vec<PendenteInfo>> {
+    list_pendentes_na(prestador, "fila")
+}
+
+pub(crate) fn list_pendentes_na(prestador: &str, situacao: &str) -> Res<Vec<PendenteInfo>> {
     if prestador.is_empty() {
         return Ok(Vec::new());
     }
     let con = banco::conn()?;
     let mut st = con.prepare(
-        "SELECT id, meta FROM pendente WHERE prestador=?1 AND situacao='fila' ORDER BY id",
+        "SELECT id, meta FROM pendente WHERE prestador=?1 AND situacao=?2 ORDER BY id",
     )?;
     let linhas = st
-        .query_map([prestador], |r| {
+        .query_map(params![prestador, situacao], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1545,10 +1595,10 @@ pub fn cancelar_pendente(prestador: &str, p: &PendenteInfo, forcar: bool) -> Res
     Ok(json!({ "numero": p.n_dps, "reaproveitado": reaproveitado }))
 }
 
-fn marcar_falha(prestador: &str, p: &mut PendenteInfo, erro: &str) {
+fn marcar_falha(prestador: &str, p: &mut PendenteInfo, erro: &str, situacao: &str) {
     p.ultima_tentativa = agora_s();
     p.ultimo_erro = erro.to_string();
-    let _ = gravar_meta(prestador, p); // anotar a falha não pode esconder a falha em si
+    let _ = gravar_meta(prestador, p, situacao); // anotar a falha não pode esconder a falha em si
 }
 
 /// Reenvia uma DPS da fila usando o XML ASSINADO + a config final guardados na hora do
@@ -1563,6 +1613,19 @@ fn marcar_falha(prestador: &str, p: &mut PendenteInfo, erro: &str) {
 /// Sucesso remove da fila. Indisponibilidade volta como pendência (fica na fila); outras
 /// rejeições 4xx voltam como rejeição (o usuário decide cancelar).
 pub fn reenviar_pendente(prestador: &str, p: &PendenteInfo, cert: &str) -> Res<Value> {
+    entregar_pendente(prestador, p, cert, "fila", false)
+}
+
+pub(crate) fn entregar_pendente_do_lote(
+    prestador: &str, p: &PendenteInfo, so_conferir: bool,
+) -> Res<Value> {
+    entregar_pendente(prestador, p, &p.cert, "lote", so_conferir)
+}
+
+fn entregar_pendente(
+    prestador: &str, p: &PendenteInfo, cert: &str, situacao: &str, so_conferir: bool,
+) -> Res<Value> {
+    let trava = travar();
     let mut p = p.clone();
     // A DPS já está assinada: o reenvio autentica com o MESMO certificado que a assinou.
     let cert = if p.cert.is_empty() {
@@ -1579,18 +1642,21 @@ pub fn reenviar_pendente(prestador: &str, p: &PendenteInfo, cert: &str) -> Res<V
     let Some(senha) = cadastro::read_cert_password(prestador, Some(cert))? else {
         return Err(Erro::valor("Senha do certificado não encontrada no banco."));
     };
-    let linha: Option<(Vec<u8>, Option<String>)> = {
+    let linha: Option<(Vec<u8>, Option<String>, String)> = {
         let con = banco::conn()?;
         con.query_row(
-            "SELECT xml, config FROM pendente WHERE prestador=?1 AND id=?2 AND situacao='fila'",
-            params![prestador, p.id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            "SELECT xml, config, meta FROM pendente WHERE prestador=?1 AND id=?2 AND situacao=?3",
+            params![prestador, p.id, situacao],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?
     };
-    let Some((assinado, config_final)) = linha else {
+    let Some((assinado, config_final, meta)) = linha else {
         return Err(Erro::valor("Este envio não está mais na fila."));
     };
+    if let Ok(atual) = serde_json::from_str::<PendenteInfo>(&meta) {
+        p.chave = atual.chave;
+    }
     let config_final = config_final.unwrap_or_default();
     if config_final.is_empty() {
         return Err(Erro::valor(
@@ -1631,9 +1697,19 @@ pub fn reenviar_pendente(prestador: &str, p: &PendenteInfo, cert: &str) -> Res<V
         recuperada_e0014: false,
     };
     let (oficial, chave) = {
-        let _trava = travar();
         let feito = (|| -> Res<(Value, String)> {
             let mut chave = aparar(&p.chave).to_string();
+            if so_conferir && chave.is_empty() {
+                let consulta = a.consultar_dps(&p.id_dps, &p.tp_amb)?;
+                chave = chave_da_resposta(consulta.get("body").unwrap_or(&Value::Null));
+                if chave.is_empty() {
+                    return Err(if consulta["status_code"] == 404 {
+                        Erro::novo("DpsNaoLocalizada", "A SEFIN não localizou a DPS.")
+                    } else {
+                        Erro::valor("A SEFIN não confirmou o estado da DPS. Tente novamente quando a consulta estiver disponível.")
+                    });
+                }
+            }
             if chave.is_empty() {
                 a.registro.evento(
                     "payload",
@@ -1680,7 +1756,7 @@ pub fn reenviar_pendente(prestador: &str, p: &PendenteInfo, cert: &str) -> Res<V
             // tentativa NÃO retransmite (senão daria E0014 de novo).
             if !chave.is_empty() && chave != p.chave {
                 p.chave = chave.clone();
-                gravar_meta(prestador, &p)?;
+                gravar_meta(prestador, &p, situacao)?;
             }
             let oficial = a.receber_nota(&json!({ "chaveAcesso": chave }), &p.id_dps)?;
             // o contador já foi reservado no enfileiramento; a atualização nunca regride
@@ -1690,23 +1766,32 @@ pub fn reenviar_pendente(prestador: &str, p: &PendenteInfo, cert: &str) -> Res<V
         match feito {
             Ok(x) => x,
             Err(e) => {
-                marcar_falha(prestador, &mut p, &e.msg);
+                if !so_conferir {
+                    marcar_falha(prestador, &mut p, &e.msg, situacao);
+                }
                 return Err(e);
             }
         }
     };
     {
-        let con = banco::conn()?;
-        con.execute(
-            "DELETE FROM pendente WHERE prestador=?1 AND id=?2 AND situacao='fila'",
-            params![prestador, p.id],
+        let mut con = banco::conn()?;
+        let tx = con.transaction()?;
+        tx.execute("UPDATE lote_envio SET estado='emitida', resultado=?3 WHERE prestador=?1 AND estado='fila' AND json_valid(resultado) AND resultado ->> '$.fila.id'=?2", params![prestador,p.id,json!({"chave":chave,"tp_amb":p.tp_amb,"official_nfse":oficial}).to_string()])?;
+        tx.execute(
+            "DELETE FROM pendente WHERE prestador=?1 AND id=?2 AND situacao=?3",
+            params![prestador, p.id, situacao],
         )?;
+        tx.commit()?;
     }
+    drop(trava);
     // Emissão de substituição concluída: marca a nota ANTIGA como substituída pela nova.
     if !p.subst_chave.is_empty() {
         let _ = marcar_substituida(prestador, &p.subst_chave, &chave); // não pode desfazer o sucesso do envio
     }
     let mut resultado = json!({ "official_nfse": oficial, "log_path": a.registro.caminho(), "chave": chave, "tp_amb": p.tp_amb, "tomador": p.tomador });
+    if situacao == "lote" {
+        return Ok(resultado);
+    }
     // SMTP fora da trava de emissão: a nota já foi concluída e retirada da fila.
     // A falha do e-mail é informada sem transformar uma emissão aceita em pendência.
     let email = (|| -> Res<Option<Value>> {

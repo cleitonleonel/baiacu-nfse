@@ -15,7 +15,7 @@ use crate::erro::{Erro, Res};
 use crate::rede::{Sessao, Tempo};
 
 /// Versão deste programa. `compilar_exe.py` confere que é a mesma do `pubspec.yaml`.
-pub const VERSAO: &str = "1.0.0.2";
+pub const VERSAO: &str = "1.0.0.3";
 /// Repositório onde saem as versões novas (dono/nome).
 pub const REPOSITORIO: &str = "williamlala/baiacu-nfse";
 /// Nome do executável do programa empacotado.
@@ -272,6 +272,10 @@ pub fn verificar(automatica: bool) -> Res<Value> {
 // --------------------------------------------------------------------------------------------- //
 /// A pasta do programa instalado (a do .exe), se este processo é o programa empacotado.
 pub fn instalado() -> Option<PathBuf> {
+    let programa = caminhos::programa();
+    if caminhos::instalado_compartilhado() && programa.join(NOME_EXE).is_file() {
+        return Some(programa);
+    }
     let exe = std::env::current_exe().ok()?;
     let pasta = exe.parent()?.to_path_buf();
     let nome = exe.file_name()?.to_string_lossy().to_string();

@@ -17,7 +17,7 @@ use crate::texto::{
     self, aparar, cnpj_valido, cpf_valido, descricao_problemas, documento_valido, format_documento,
     is_decimal, lower_email, norm_decimal, only_digits, only_doc, sort_nome, upper_text,
 };
-use crate::{banco, catalogo, certificado, leiaute, pyfmt, segredos};
+use crate::{banco, caminhos, catalogo, certificado, leiaute, pyfmt, segredos};
 
 pub const AMBIENTE_PRODUCAO: &str = "1";
 pub const AMBIENTE_HOMOLOGACAO: &str = "2";
@@ -385,12 +385,7 @@ fn ler_pfx_do_arquivo(caminho: &str, senha: &str) -> Res<(Vec<u8>, certificado::
         return Err(Erro::valor("Informe a senha do certificado."));
     }
     let origem = Path::new(caminho);
-    if !origem.exists() {
-        return Err(Erro::nao_encontrado(format!(
-            "Arquivo do certificado não encontrado: {caminho}"
-        )));
-    }
-    let dados = std::fs::read(origem)?;
+    let dados = caminhos::arquivo_usuario(|| std::fs::read(origem))?;
     let material = certificado::carregar_pfx(&dados, senha)?;
     Ok((dados, material))
 }
@@ -1352,6 +1347,7 @@ pub struct ServicoForm {
     pub interm_IM: String,
     // Grupo IBS/CBS da DPS. Vazio preserva cadastros anteriores até a classificação fiscal ser
     // escolhida; o código da classificação nunca é presumido pelo sistema.
+    pub rtc_plataforma_digital: bool,
     pub rtc_indDest: String,
     pub rtc_cIndOp: String,
     pub rtc_CST: String,
@@ -1428,6 +1424,7 @@ impl Default for ServicoForm {
             interm_documento: v(),
             interm_xNome: v(),
             interm_IM: v(),
+            rtc_plataforma_digital: false,
             rtc_indDest: v(),
             rtc_cIndOp: v(),
             rtc_CST: v(),
@@ -2208,6 +2205,9 @@ impl ServicoForm {
                     par("nome", self.nome.as_str()),
                     par("incluir_contrib", if contrib { "1" } else { "0" }),
                 ];
+                if self.rtc_plataforma_digital {
+                    gui.push(par("rtc_plataforma_digital", "1"));
+                }
                 // só o que foge do padrão é gravado
                 if aparar(&self.ret_abate_desconto) == "0" {
                     gui.push(par("ret_abate_desconto", "0"));
@@ -2380,6 +2380,7 @@ impl ServicoForm {
             interm_documento: ou(ini.val("interm", "CNPJ", ""), &ini.val("interm", "CPF", "")),
             interm_xNome: ini.val("interm", "xNome", ""),
             interm_IM: ini.val("interm", "IM", ""),
+            rtc_plataforma_digital: ini.val("gui.servico", "rtc_plataforma_digital", "0") == "1",
             rtc_indDest: ini.val("IBSCBS", "indDest", ""),
             rtc_cIndOp: ini.val("IBSCBS", "cIndOp", ""),
             rtc_CST: ini.val("IBSCBS.valores.trib.gIBSCBS", "CST", ""),
@@ -2502,8 +2503,8 @@ fn numeradas(ini: &Ini, base: &str) -> Vec<String> {
     numeros.into_iter().map(|n| format!("{base}.{n}")).collect()
 }
 
-/// Prazo do Ato Conjunto RFB/CGIBS 4/2026 para serviços ISS fora do SN. O grupo continua
-/// opcional antes do prazo e na homologação.
+/// Prazo do Ato Conjunto RFB/CGIBS 4/2026, com as alterações do Ato nº 7/2026.
+/// O grupo continua opcional antes do prazo e na homologação.
 pub fn rtc_required(
     prestador: &str,
     form: &ServicoForm,
@@ -2513,16 +2514,19 @@ pub fn rtc_required(
     if ambiente != AMBIENTE_PRODUCAO {
         return Ok(false);
     }
-    if get_prestador_form(prestador)?.opSimpNac != "1" {
-        return Ok(false);
-    }
+    let simples = get_prestador_form(prestador)?.opSimpNac != "1";
     let codigo = only_digits(&form.cTribNac);
-    if codigo.len() < 4 {
-        return Ok(false);
-    }
-    let tarde =
-        ["0103", "0105", "0109", "1601"].contains(&&codigo[..4]) || codigo.starts_with("99");
-    let inicio = NaiveDate::from_ymd_opt(2026, if tarde { 12 } else { 10 }, 1).unwrap_or_default();
+    let Some(subitem) = codigo.get(..4) else { return Ok(false) };
+    let sujeito_iss = matches!(form.tribISSQN.trim(), "" | "1");
+    let inicio = if form.rtc_plataforma_digital
+        || sujeito_iss && matches!(subitem, "0103" | "0105" | "0109" | "1601")
+    {
+        NaiveDate::from_ymd_opt(2027, 3, 1)
+    } else if codigo.starts_with("99") || simples || !sujeito_iss {
+        NaiveDate::from_ymd_opt(2027, 1, 1)
+    } else {
+        NaiveDate::from_ymd_opt(2026, 10, 1)
+    }.ok_or_else(|| Erro::valor("Data de início do IBS/CBS inválida."))?;
     let hoje = chrono::Local::now().date_naive();
     Ok(competencia.unwrap_or(hoje) >= inicio)
 }

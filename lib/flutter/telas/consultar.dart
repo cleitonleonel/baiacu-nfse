@@ -134,7 +134,12 @@ class ProgressoExportacao {
   void cancelar() {
     cancelada = true;
     try {
-      ja<Object?>('nucleo.cancelar', {'ficha': ficha});
+      chamar<Object?>('nucleo.cancelar', {'ficha': ficha}).catchError((
+        Object e,
+      ) {
+        debugPrint('Falha ao cancelar: $e');
+        return null;
+      });
     } catch (_) {}
     fechar();
     app.toast('Exportação cancelada.');
@@ -187,6 +192,7 @@ class ConsultarState extends State<TelaConsultar>
   ); // reenvio automático da fila
 
   // ---- filtros --------------------------------------------------------------------------- //
+  final _ddBasePeriodo = Suspensa(valor: 'emissao', opcoes: opcoesBasePeriodo);
   final _ddPeriodo = Suspensa(valor: 'mes', opcoes: opcoesDePeriodo())
     ..por('mes');
   DateTime? _de;
@@ -207,7 +213,6 @@ class ConsultarState extends State<TelaConsultar>
   bool _temClientes = false;
   final _aoVivo = BuscaAoVivo();
   Timer? _filtroTimer;
-  final _giro = Giro();
   final _celulasNotas = CelulasProntas();
   final _celulasPendentes = CelulasProntas();
 
@@ -236,9 +241,11 @@ class ConsultarState extends State<TelaConsultar>
   void initState() {
     super.initState();
     app.aoEntrar[2] = () {
-      // Reentrar sem mudanças não refaz consulta: só recarrega quando trocou de prestador,
-      // houve emissão ou é a 1ª vez.
-      if (_carregadoPrest != app.prestador) recarregarTomadores();
+      if (_carregadoPrest != app.prestador) {
+        recarregarTomadores();
+      } else {
+        carregarPagina();
+      }
     };
     app.aoTrocarPrestador.add(_aoTrocarPrestador);
     app.recarregarTelas.add(recarregarTomadores);
@@ -258,15 +265,25 @@ class ConsultarState extends State<TelaConsultar>
 
   void _redesenhar() => redesenhar();
 
-  void _aoMudarNotas() => _carregadoPrest = null;
+  void _aoMudarNotas() {
+    _consultaAtual++;
+    _carregando = false;
+    _carregadoPrest = null;
+  }
 
   void _aoTrocarPrestador() {
+    _consultaAtual++;
+    _avisoFilaAtual++;
+    _carregando = false;
     _busca.text = '';
     _empresasSel = null;
     _pagina = 0;
   }
 
   void _pararTimers() {
+    _consultaAtual++;
+    _avisoFilaAtual++;
+    _carregando = false;
     _aoVivo.cancelar();
     _filtroTimer?.cancel();
     _filtroTimer = null;
@@ -276,22 +293,38 @@ class ConsultarState extends State<TelaConsultar>
   void dispose() {
     _pararTimers();
     _pendTimer?.cancel();
-    _giro.dispose();
     app.semAtualizar(_redesenhar);
     app.aoTrocarPrestador.remove(_aoTrocarPrestador);
     app.recarregarTelas.remove(recarregarTomadores);
     app.aoMudarNotas.remove(_aoMudarNotas);
     app.aoPararTimers.remove(_pararTimers);
+    _ddBasePeriodo.dispose();
     super.dispose();
   }
 
   // ---- fila de contingência (DPS pendentes de envio) ------------------------------------------ //
   /// Mostra/esconde o aviso de pendentes e liga/desliga o ciclo de reenvio (5 min).
-  void _refazerAvisoFila() {
+  int _avisoFilaAtual = 0;
+  Future<void> _refazerAvisoFila() async {
+    final leitura = ++_avisoFilaAtual;
+    app.atualizarLotesPendentes();
     final p = app.prestador;
-    _pendN = p.isEmpty
-        ? 0
-        : ja<int>('emissao.count_pendentes', {'prestador': p});
+    int quantidade;
+    try {
+      quantidade = p.isEmpty
+          ? 0
+          : await chamar<int>('emissao.count_pendentes', {'prestador': p});
+    } catch (e) {
+      debugPrint('Falha ao atualizar pendências: $e');
+      return;
+    }
+    if (!mounted ||
+        !app.viva ||
+        leitura != _avisoFilaAtual ||
+        p != app.prestador)
+      return;
+    _pendN = quantidade;
+    _redesenhar();
     if (_pendN > 0 && _pendLimite == null && !_pendEnviando) {
       _pendLimite = DateTime.now().add(_tentarDeNovo);
       _pendTique();
@@ -345,6 +378,15 @@ class ConsultarState extends State<TelaConsultar>
       return;
     }
     if (_pendEnviando) return;
+    if (app.ocupado) {
+      if (automatico) {
+        _pendLimite = DateTime.now().add(const Duration(seconds: 30));
+        _pendTique();
+      } else {
+        app.toast('Aguarde a operação atual antes de reenviar a fila.');
+      }
+      return;
+    }
     final prest = app.prestador;
     final cert = app.cert;
     final pend = prest.isEmpty
@@ -402,6 +444,10 @@ class ConsultarState extends State<TelaConsultar>
   void _reenviarUm(Map<String, dynamic> p) {
     if (!app.temPermissao('consultar.reenviar')) {
       app.exigirPermissao('consultar.reenviar', () => _reenviarUm(p));
+      return;
+    }
+    if (app.ocupado) {
+      app.toast('Aguarde a operação atual antes de reenviar.');
       return;
     }
     if (_pendEnviando) {
@@ -723,7 +769,8 @@ class ConsultarState extends State<TelaConsultar>
                   altura: TamanhosConsultar
                       .rotuloMarcadasLengthDeDocsLengthEmpresaSSelecionada
                       .altura,
-                  idLayout: 'TamanhosConsultar.rotuloMarcadasLengthDeDocsLengthEmpresaSSelecionada',
+                  idLayout:
+                      'TamanhosConsultar.rotuloMarcadasLengthDeDocsLengthEmpresaSSelecionada',
                 ),
               ],
               espaco: 4,
@@ -762,7 +809,8 @@ class ConsultarState extends State<TelaConsultar>
                       altura: TamanhosConsultar
                           .rotuloEMaisFiltradosLengthVisiveisLengthEmpresaS
                           .altura,
-                      idLayout: 'TamanhosConsultar.rotuloEMaisFiltradosLengthVisiveisLengthEmpresaS',
+                      idLayout:
+                          'TamanhosConsultar.rotuloEMaisFiltradosLengthVisiveisLengthEmpresaS',
                     ),
                   if (filtrados.isEmpty)
                     Tx(
@@ -775,7 +823,8 @@ class ConsultarState extends State<TelaConsultar>
                       altura: TamanhosConsultar
                           .rotuloNenhumaEmpresaEncontradaComEssaBusca
                           .altura,
-                      idLayout: 'TamanhosConsultar.rotuloNenhumaEmpresaEncontradaComEssaBusca',
+                      idLayout:
+                          'TamanhosConsultar.rotuloNenhumaEmpresaEncontradaComEssaBusca',
                     ),
                 ],
                 espaco: 0,
@@ -875,6 +924,7 @@ class ConsultarState extends State<TelaConsultar>
       'prestador': app.prestador,
       'tomadores': comBusca ? toms : null,
       'ini': dataIso(ini),
+      'por_competencia': _ddBasePeriodo.valor == 'competencia',
       'fim': dataIso(fim),
       'termo': comBusca ? termo : '',
       'sort_col': _ordem?.$1,
@@ -886,11 +936,11 @@ class ConsultarState extends State<TelaConsultar>
   /// Entrada da consulta: mostra a 1ª página das notas emitidas por este programa.
   void _aplicarFiltro() {
     if (app.prestador.isEmpty) {
+      _consultaAtual++;
       _pendentes = const [];
       _notas = const [];
       _vazio = 'Selecione um prestador.';
       _total = 0;
-      _giro.parar();
       app.atualizar();
       return;
     }
@@ -899,66 +949,86 @@ class ConsultarState extends State<TelaConsultar>
   }
 
   /// Mostra a página atual.
-  void carregarPagina() {
+  int _consultaAtual = 0;
+  bool _carregando = false;
+  Future<void> carregarPagina() async {
     if (!app.temPermissao('consultar.pesquisar')) return;
-    try {
-      _carregar();
-    } catch (e) {
-      registrar('Falha ao carregar a página da Consulta: $e', nivel: 'error');
-    }
+    final consulta = ++_consultaAtual;
+    _carregando = true;
     _redesenhar();
-  }
-
-  void _carregar() {
-    _carregadoPrest = app.prestador; // a tela passa a refletir este prestador
+    final prest = app.prestador;
+    final opcoes = _opcoesDaConsulta();
+    final porPagina = _porPagina;
+    var paginaAtual = _pagina;
     final (toms, ini, fim, _, _) = filtro();
+    bool atual() =>
+        mounted &&
+        app.viva &&
+        consulta == _consultaAtual &&
+        prest == app.prestador;
     if (toms != null && toms.isEmpty) {
-      // filtro de empresas com NENHUMA marcada: sem resultados
       _total = 0;
       _pendentes = const [];
       _notas = const [];
+      _carregando = false;
       _vazio = 'Nenhuma empresa selecionada no filtro.';
+      _carregadoPrest = prest;
+      _redesenhar();
       return;
     }
-    List<dynamic> pagina(int offset) => ja<List>('consulta.page_nfse_index', {
-      ..._opcoesDaConsulta(),
-      'limit': _porPagina,
-      'offset': offset,
-    });
-    var r = pagina(_pagina * _porPagina);
-    _total = (r[0] as num).toInt();
-    final paginas = math.max(1, (_total / _porPagina).ceil());
-    final nova = _pagina.clamp(0, paginas - 1);
-    // Página atual ficou fora do total (o filtro encolheu os resultados)? Consulta de novo
-    // no lugar corrigido.
-    if (nova != _pagina) {
-      _pagina = nova;
-      r = pagina(_pagina * _porPagina);
+    Future<List> pagina(int offset) => chamar<List>(
+      'consulta.page_nfse_index',
+      {...opcoes, 'limit': porPagina, 'offset': offset},
+    );
+    try {
+      var r = await pagina(paginaAtual * porPagina);
+      if (!atual()) return;
+      final total = (r[0] as num).toInt();
+      final paginas = math.max(1, (total / porPagina).ceil());
+      final nova = paginaAtual.clamp(0, paginas - 1);
+      if (nova != paginaAtual) {
+        paginaAtual = nova;
+        r = await pagina(paginaAtual * porPagina);
+        if (!atual()) return;
+      }
+      final auxiliares = await Future.wait([
+        if (paginaAtual == 0)
+          chamar<List>('emissao.list_pendentes', {'prestador': prest})
+        else
+          Future<List>.value([]),
+        chamar<List>('emissao.subst_pairs', {'prestador': prest}),
+      ]);
+      if (!atual()) return;
+      final pend = [
+        for (final v in auxiliares[0].take(_maxLinhas))
+          Map<String, dynamic>.from(v as Map),
+      ];
+      _pagina = paginaAtual;
+      _total = total;
+      _pares = {
+        for (final par in auxiliares[1]) par[0] as String: par[1] as String,
+      };
+      _pendentes = pend;
+      _notas = [
+        for (final x in (r[1] as List).take(_maxLinhas - pend.length))
+          Map<String, dynamic>.from(x as Map),
+      ];
+      _carregadoPrest = prest;
+      _refazerAvisoFila();
+      final faixa = (ini != null || fim != null)
+          ? ' • período ${ini == null ? '…' : dataBr(ini)} a ${fim == null ? '…' : dataBr(fim)}'
+          : '';
+      _vazio = _total == 0
+          ? 'Nenhuma NFS-e encontrada$faixa.'
+          : '${milhar(_total)} NFS-e encontrada(s)$faixa.';
+    } catch (e) {
+      if (!atual()) return;
+      registrar('Falha ao carregar a página da Consulta: $e', nivel: 'error');
     }
-    final regs = [
-      for (final x in r[1] as List) Map<String, dynamic>.from(x as Map),
-    ];
-    // DPS pendentes de envio SEMPRE no topo da 1ª página, em laranja — são alerta
-    // operacional; não entram no filtro, na ordenação nem no total.
-    var pend = _pagina == 0
-        ? jaLista('emissao.list_pendentes', {'prestador': app.prestador})
-        : <Map<String, dynamic>>[];
-    if (pend.length > _maxLinhas) pend = pend.sublist(0, _maxLinhas);
-    _pares = {
-      for (final (a, b) in jaPares('emissao.subst_pairs', {
-        'prestador': app.prestador,
-      }))
-        a: b,
-    };
-    _pendentes = pend;
-    _notas = regs.take(_maxLinhas - pend.length).toList();
-    _refazerAvisoFila();
-    final faixa = (ini != null || fim != null)
-        ? ' • período ${ini == null ? '…' : dataBr(ini)} a ${fim == null ? '…' : dataBr(fim)}'
-        : '';
-    _vazio = _total == 0
-        ? 'Nenhuma NFS-e encontrada$faixa.'
-        : '${milhar(_total)} NFS-e encontrada(s)$faixa.';
+    if (atual()) {
+      _carregando = false;
+      _redesenhar();
+    }
   }
 
   int get _paginas => math.max(1, (_total / _porPagina).ceil());
@@ -975,7 +1045,7 @@ class ConsultarState extends State<TelaConsultar>
     }
     // Nasce com o período e o ambiente que estão na tela da Consulta.
     late final Dialogo d;
-    late final Suspensa ddPer, ddAmb;
+    late final Suspensa ddPer, ddAmb, ddBase;
     var de = _de;
     var ate = _ate;
     var anterior = _periodoAnt;
@@ -1047,7 +1117,16 @@ class ConsultarState extends State<TelaConsultar>
         return;
       }
       app.fecharDialogo();
-      _exportarDados(ini, fim, amb, xml, danfse, eventos, fmts);
+      _exportarDados(
+        ini,
+        fim,
+        amb,
+        xml,
+        danfse,
+        eventos,
+        fmts,
+        porCompetencia: ddBase.valor == 'competencia',
+      );
     }
 
     d = Dialogo(
@@ -1078,6 +1157,12 @@ class ConsultarState extends State<TelaConsultar>
             ],
             quebra: true,
             idLayout: 'Grupo.consultar.lin.2',
+          ),
+          ListaSuspensa(
+            estado: ddBase,
+            rotulo: 'Filtrar por',
+            largura: 210,
+            idLayout: 'Consultar.exportar.filtrarPor',
           ),
           Tx(
             'O que exportar',
@@ -1209,6 +1294,7 @@ class ConsultarState extends State<TelaConsultar>
       idLayout: 'Janela.consultar.Dialogo.4',
     );
     ddPer = d.suspensa(valor: anterior, opcoes: opcoesDePeriodo(intervalo()));
+    ddBase = d.suspensa(valor: _ddBasePeriodo.valor, opcoes: opcoesBasePeriodo);
     ddAmb = d.suspensa(
       valor: _ddAmbiente.valor ?? 'todos',
       opcoes: opcoesDeAmbiente,
@@ -1275,13 +1361,15 @@ class ConsultarState extends State<TelaConsultar>
     bool xml,
     bool danfse,
     bool eventos,
-    List<String> fmts,
-  ) async {
+    List<String> fmts, {
+    required bool porCompetencia,
+  }) async {
     final (toms, _, _, termo, _) = filtro();
     final prestador = app.prestador;
     final base = <String, Object?>{
       'prestador': prestador,
       'ini': dataIso(ini),
+      'por_competencia': porCompetencia,
       'fim': dataIso(fim),
       'ambiente': amb ?? '',
     };
@@ -1506,7 +1594,8 @@ class ConsultarState extends State<TelaConsultar>
                 altura: TamanhosConsultar
                     .rotuloOPrazoParaCancelamentoDiretoDestaNFSE
                     .altura,
-                idLayout: 'TamanhosConsultar.rotuloOPrazoParaCancelamentoDiretoDestaNFSE',
+                idLayout:
+                    'TamanhosConsultar.rotuloOPrazoParaCancelamentoDiretoDestaNFSE',
               ),
               Tx(
                 'Depois desse prazo a Sefin Nacional não permite o cancelamento direto: '
@@ -1520,7 +1609,8 @@ class ConsultarState extends State<TelaConsultar>
                 altura: TamanhosConsultar
                     .rotuloDepoisDessePrazoASefinNacionalNaoPermite
                     .altura,
-                idLayout: 'TamanhosConsultar.rotuloDepoisDessePrazoASefinNacionalNaoPermite',
+                idLayout:
+                    'TamanhosConsultar.rotuloDepoisDessePrazoASefinNacionalNaoPermite',
               ),
             ],
             justa: true,
@@ -1613,7 +1703,8 @@ class ConsultarState extends State<TelaConsultar>
             altura: TamanhosConsultar
                 .rotuloEstaAcaoTransmiteOEventoDeCancelamentoA
                 .altura,
-            idLayout: 'TamanhosConsultar.rotuloEstaAcaoTransmiteOEventoDeCancelamentoA',
+            idLayout:
+                'TamanhosConsultar.rotuloEstaAcaoTransmiteOEventoDeCancelamentoA',
           ),
         ],
         justa: true,
@@ -1692,8 +1783,8 @@ class ConsultarState extends State<TelaConsultar>
         _resultadoEstorno(
           false,
           'Não foi possível confirmar o estorno da NFS-e nº $n. O evento PODE '
-          'ter sido registrado na SEFIN — confira na Consulta (Recarregar) ou '
-          'no portal nacional ANTES de tentar de novo.\n\nDetalhe: $e',
+          'ter sido registrado na SEFIN. Confira o status no portal nacional '
+          'antes de tentar de novo.\n\nDetalhe: $e',
           null,
         );
         return;
@@ -1842,7 +1933,8 @@ class ConsultarState extends State<TelaConsultar>
               altura: TamanhosConsultar
                   .rotuloTextoLength8000TextoSubstring08000Texto
                   .altura,
-              idLayout: 'TamanhosConsultar.rotuloTextoLength8000TextoSubstring08000Texto',
+              idLayout:
+                  'TamanhosConsultar.rotuloTextoLength8000TextoSubstring08000Texto',
             ),
           ],
           rolar: true,
@@ -1985,7 +2077,8 @@ class ConsultarState extends State<TelaConsultar>
             _celula(
               0,
               _ou(s('n_dps'), '—'),
-              propria: 'Número da DPS — a NFS-e (nº e chave) sai quando o envio for aceito',
+              propria:
+                  'Número da DPS — a NFS-e (nº e chave) sai quando o envio for aceito',
             ),
           ),
           DataCell(_celula(1, _ou(s('tomador_nome'), _ou(s('tomador'), '—')))),
@@ -2026,7 +2119,8 @@ class ConsultarState extends State<TelaConsultar>
                     altura: TamanhosConsultar
                         .botaoAceitaConcluirDownloadNotaJaAceitaReenviarAgora
                         .altura,
-                    idLayout: 'TamanhosConsultar.botaoAceitaConcluirDownloadNotaJaAceitaReenviarAgora',
+                    idLayout:
+                        'TamanhosConsultar.botaoAceitaConcluirDownloadNotaJaAceitaReenviarAgora',
                   ),
                   BotaoIcone(
                     Icons.download_for_offline,
@@ -2109,7 +2203,15 @@ class ConsultarState extends State<TelaConsultar>
           ),
           DataCell(_celula(2, formatarDocumento(s('tomador')), cor: cor)),
           DataCell(_celula(3, _ou(s('grupo'), '—'), cor: cor)),
-          DataCell(_celula(4, dataHora(s('dhProc')), cor: cor)),
+          DataCell(
+            _celula(
+              4,
+              _ddBasePeriodo.valor == 'competencia'
+                  ? dataIsoParaBr(s('dCompet'))
+                  : dataHora(s('dhProc')),
+              cor: cor,
+            ),
+          ),
           DataCell(_celula(5, s('ambiente_label'), cor: cor)),
           DataCell(
             _celula(
@@ -2285,7 +2387,11 @@ class ConsultarState extends State<TelaConsultar>
         coluna('Cliente'),
         coluna('Documento'),
         coluna('Grupo'),
-        coluna('Processada em'),
+        coluna(
+          _ddBasePeriodo.valor == 'competencia'
+              ? 'Competência'
+              : 'Processada em',
+        ),
         coluna('Ambiente'),
         coluna('Status'),
         coluna('vServ', numerica: true),
@@ -2342,20 +2448,6 @@ class ConsultarState extends State<TelaConsultar>
             altura: TamanhosConsultar.botaoExportarDados.altura,
             idLayout: 'TamanhosConsultar.botaoExportarDados',
           ),
-          // O ícone do botão Atualizar gira uma volta a cada recarga.
-          BotaoIcone(
-            null,
-            filho: IconeGiratorio(_giro, Icons.refresh),
-            dica: 'Atualizar a lista',
-            aoClicar: () {
-              _giro.girar();
-              carregarPagina();
-              _giro.parar();
-            },
-            largura: TamanhosConsultar.botaoAtualizarALista.largura,
-            altura: TamanhosConsultar.botaoAtualizarALista.altura,
-            idLayout: 'TamanhosConsultar.botaoAtualizarALista',
-          ),
         ], idLayout: 'Grupo.consultar.lin.11'),
         if (_pendN > 0 && app.temPermissao('consultar.pesquisar'))
           Ct(
@@ -2375,7 +2467,8 @@ class ConsultarState extends State<TelaConsultar>
                 altura: TamanhosConsultar
                     .rotuloExistemNFSEPendentesDeEnvioPendNPendente
                     .altura,
-                idLayout: 'TamanhosConsultar.rotuloExistemNFSEPendentesDeEnvioPendNPendente',
+                idLayout:
+                    'TamanhosConsultar.rotuloExistemNFSEPendentesDeEnvioPendNPendente',
               ),
               const Expanded(child: SizedBox()),
               ValueListenableBuilder<String>(
@@ -2426,6 +2519,13 @@ class ConsultarState extends State<TelaConsultar>
                 idLayout: 'TamanhosConsultar.campoRotuloDaBusca',
               ),
               ListaSuspensa(
+                estado: _ddBasePeriodo,
+                rotulo: 'Data',
+                largura: 152,
+                aoSelecionar: (_) => _aplicarFiltro(),
+                idLayout: 'Consultar.filtrarPor',
+              ),
+              ListaSuspensa(
                 estado: _ddPeriodo,
                 rotulo: 'Período',
                 largura:
@@ -2466,7 +2566,20 @@ class ConsultarState extends State<TelaConsultar>
             idLayout: 'TamanhosConsultar.rotuloVazio',
           ),
           // Rolagem nas duas direções com a barra HORIZONTAL fixa no rodapé VISÍVEL.
-          Expanded(child: tabela),
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: AbsorbPointer(absorbing: _carregando, child: tabela),
+                ),
+                if (_carregando)
+                  const Align(
+                    alignment: Alignment.topCenter,
+                    child: LinearProgressIndicator(minHeight: 2),
+                  ),
+              ],
+            ),
+          ),
           divisor(altura: 1),
           BarraPaginacao(
             pagina: _pagina,

@@ -18,7 +18,11 @@ pub type Avisar<'a> = &'a dyn Fn(&Value);
 
 /// Chama e embrulha o resultado/erro no envelope; as chamadas demoradas avisam do andamento.
 pub fn chamar_avisando(metodo: &str, args: &Value, avisar: Avisar) -> Value {
-    match executar(metodo, args, avisar) {
+    envelope(executar(metodo, args, avisar))
+}
+
+pub(crate) fn envelope(resultado: Res<Value>) -> Value {
+    match resultado {
         Ok(v) => json!({ "ok": v }),
         Err(e) => match e.dados {
             Some(d) => json!({ "erro": { "tipo": e.tipo, "msg": e.msg, "dados": d } }),
@@ -123,6 +127,7 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
         return crate::permissoes::executar(metodo, a);
     }
     crate::permissoes::checar_metodo(metodo, a)?;
+    if metodo.starts_with("lotes.") { return crate::lotes::executar(metodo,a); }
     match metodo {
         "nucleo.cancelar" => {
             cancelar(texto(a, "ficha")?);
@@ -186,14 +191,14 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
             Ok(Value::Null)
         }
         "banco.validar_banco" => {
-            banco::validar_banco(
+            caminhos::arquivo_usuario(|| banco::validar_banco(
                 Path::new(texto(a, "caminho")?),
                 texto_ou(a, "senha_mestra", ""),
-            )?;
+            ))?;
             Ok(Value::Null)
         }
         "banco.restaurar_de" => {
-            banco::restaurar_de(
+            banco::restaurar_externo(
                 Path::new(texto(a, "origem")?),
                 texto_ou(a, "senha_mestra", ""),
             )?;

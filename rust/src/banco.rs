@@ -244,6 +244,41 @@ pub fn criar_tabelas(con: &Connection) -> Res<()> {
             config    TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (prestador, id, situacao)
         );
+        CREATE TABLE IF NOT EXISTS lote (
+            prestador TEXT NOT NULL, id TEXT NOT NULL, documento TEXT NOT NULL,
+            revisao INTEGER NOT NULL, PRIMARY KEY (prestador, id)
+        );
+        CREATE TABLE IF NOT EXISTS lote_tentativa (
+            id INTEGER PRIMARY KEY, prestador TEXT NOT NULL, lote TEXT NOT NULL, linha TEXT NOT NULL,
+            ambiente TEXT NOT NULL, competencia TEXT NOT NULL, estado TEXT NOT NULL, resultado TEXT NOT NULL,
+            criado TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS lote_execucao (
+            prestador TEXT NOT NULL, id TEXT NOT NULL, origem TEXT NOT NULL,
+            criado TEXT NOT NULL, ambiente TEXT NOT NULL,
+            PRIMARY KEY (prestador, id)
+        );
+        CREATE TABLE IF NOT EXISTS lote_execucao_fim (
+            prestador TEXT NOT NULL, id TEXT NOT NULL, criado TEXT NOT NULL,
+            PRIMARY KEY (prestador, id)
+        );
+        CREATE TABLE IF NOT EXISTS lote_envio (
+            prestador TEXT NOT NULL, lote TEXT NOT NULL, linha TEXT NOT NULL,
+            ambiente TEXT NOT NULL, competencia TEXT NOT NULL, estado TEXT NOT NULL,
+            resultado TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (prestador, lote, linha, ambiente, competencia)
+        );
+        CREATE TABLE IF NOT EXISTS lote_envio_servico (
+            prestador TEXT NOT NULL, tomador TEXT NOT NULL, servico TEXT NOT NULL,
+            competencia TEXT NOT NULL, ambiente TEXT NOT NULL, lote TEXT NOT NULL, linha TEXT NOT NULL,
+            PRIMARY KEY (prestador, tomador, servico, competencia, ambiente)
+        );
+        UPDATE pendente AS p SET situacao='lote'
+        WHERE p.situacao='fila' AND EXISTS (
+            SELECT 1 FROM lote_envio e
+            WHERE e.prestador=p.prestador AND e.estado='fila'
+                AND json_valid(e.resultado) AND e.resultado ->> '$.fila.id'=p.id
+        );
         ",
     )?;
     Ok(())
@@ -269,7 +304,10 @@ pub(crate) fn reiniciar_schema() {
 }
 
 pub fn get_meta(chave: &str) -> Res<String> {
-    let con = conn()?;
+    get_meta_em(&conn()?, chave)
+}
+
+pub(crate) fn get_meta_em(con: &Connection, chave: &str) -> Res<String> {
     let v: Option<String> = con
         .query_row("SELECT valor FROM meta WHERE chave = ?1", [chave], |r| {
             r.get(0)
@@ -310,7 +348,11 @@ pub fn load_ini(caminho: &str, literal: bool) -> Res<Ini> {
         }
         return Ok(ini);
     }
-    Ini::de_arquivo(&caminhos::absoluto(caminho), literal)
+    let p = caminhos::absoluto(caminho);
+    if caminho.starts_with("configs/") {
+        return Ini::de_arquivo(&p, literal);
+    }
+    caminhos::arquivo_usuario(|| Ini::de_arquivo(&p, literal))
 }
 
 pub fn exists_ini(caminho: &str) -> Res<bool> {
@@ -325,18 +367,20 @@ pub fn exists_ini(caminho: &str) -> Res<bool> {
             .optional()?;
         return Ok(achou.is_some());
     }
-    Ok(caminhos::absoluto(caminho).exists())
+    caminhos::arquivo_usuario(|| Ok(caminhos::absoluto(caminho).exists()))
 }
 
 /// Grava o Ini: no BANCO (chaves gerenciadas) ou no arquivo (demais).
 pub fn save_ini(caminho: &str, ini: &Ini) -> Res<()> {
     if !gerenciado(caminho) {
         let p = caminhos::absoluto(caminho);
-        if let Some(pai) = p.parent() {
-            fs::create_dir_all(pai)?;
-        }
-        fs::write(&p, ini.para_texto())?;
-        return Ok(());
+        return caminhos::arquivo_usuario(|| {
+            if let Some(pai) = p.parent() {
+                fs::create_dir_all(pai)?;
+            }
+            fs::write(&p, ini.para_texto())?;
+            Ok(())
+        });
     }
     let chave = caminhos::chave_logica(caminho);
     let mut con = conn()?;
@@ -568,7 +612,7 @@ pub(crate) fn copiar_paginas(origem: &Connection, destino: &mut Connection) -> R
 pub(crate) struct ArquivoCopia(pub PathBuf);
 impl ArquivoCopia {
     pub(crate) fn novo(prefixo: &str) -> Res<Self> {
-        let pasta = std::env::temp_dir().join("BaiacuNFSe").join("copias");
+        let pasta = caminho_db().with_file_name(".copias");
         fs::create_dir_all(&pasta)?;
         let nome = format!(
             "{prefixo}_{}_{}.db",
@@ -714,4 +758,22 @@ pub fn restaurar_de(origem: &Path, senha_mestra: &str) -> Res<()> {
     reiniciar_schema();
     crate::chaves::sincronizar()?;
     Ok(())
+}
+
+/// Copia o arquivo escolhido pelo operador usando o token dele. A troca da base
+/// usa uma cópia privada, inclusive quando a origem está em outro volume.
+pub(crate) fn restaurar_externo(origem: &Path, senha_mestra: &str) -> Res<()> {
+    if caminhos::normalizar(origem) == caminhos::normalizar(&caminho_db()) {
+        return Err(Erro::valor("Escolha um arquivo de backup."));
+    }
+    let mut fonte = caminhos::arquivo_usuario(|| fs::File::open(origem))?;
+    let nome = format!("dados-restauracao-{}.db", hex::encode(crate::chaves::aleatorio(16)));
+    let caminho = caminho_db().with_file_name(nome);
+    let mut copia = fs::OpenOptions::new().write(true).create_new(true).open(&caminho)?;
+    let copiou = std::io::copy(&mut fonte, &mut copia);
+    drop(copia);
+    let resultado = copiou.map_err(Erro::from).and_then(|_| restaurar_de(&caminho, senha_mestra));
+    let _ = fs::remove_file(&caminho);
+    let _ = fs::remove_file(caminho.with_extension("db-journal"));
+    resultado
 }

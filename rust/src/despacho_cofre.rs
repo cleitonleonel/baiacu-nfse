@@ -211,9 +211,10 @@ pub fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Option<Res<Value>> {
         })(),
 
         // ---- proteção do arquivo ------------------------------------------------------------- //
-        "cofre.verificar" => js(cofre::verificar(
-            a.get("caminho").and_then(Value::as_str).map(Path::new),
-        )),
+        "cofre.verificar" => match a.get("caminho").and_then(Value::as_str).map(Path::new) {
+            Some(p) => js(cofre::verificar_copia_usuario(p)),
+            None => js(cofre::verificar(None)),
+        },
         "cofre.copiar_seguranca" => (|| {
             js(cofre::copiar_seguranca(logico(a, "forcar"))?
                 .map(|p| p.to_string_lossy().into_owned()))

@@ -2,6 +2,8 @@
 /// uma com a própria edição (Editar <-> Salvar). O Salvar não fecha a janela.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -12,6 +14,7 @@ import '../kit/contorno_campo.dart';
 import '../kit/flet.dart';
 import '../kit/formatos.dart';
 import 'emitir.dart';
+import 'periodo.dart' show abrirVencimento;
 
 // Índice de municípios já normalizado (1x por execução): (nome sem acento, código, nome, UF).
 // A tela NUNCA monta uma lista suspensa com os ~5.570 municípios: a busca é em memória, por
@@ -76,12 +79,31 @@ String _cima(String? s) => (s ?? '').trim().toUpperCase();
 
 /// [aba]/[slug]: aba e serviço com que a janela abre (usados ao REABRIR o cadastro quando o
 /// Esc cancela uma edição — o usuário volta para onde estava).
-void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
-  final chave = tomador == null ? 'clientes.adicionar' : 'clientes.editar';
+void abrirCliente(
+  App app,
+  String? tomador, {
+  int aba = 0,
+  String? slug,
+  Map<String, dynamic>? servicoDoLote,
+  FutureOr<bool> Function(Map<String, dynamic>)? aoConfirmarLote,
+}) {
+  final emLote = aoConfirmarLote != null;
+  final chave = emLote
+      ? 'lotes.editar'
+      : tomador == null
+      ? 'clientes.adicionar'
+      : 'clientes.editar';
   if (!app.temPermissao(chave)) {
     app.exigirPermissao(
       chave,
-      () => abrirCliente(app, tomador, aba: aba, slug: slug),
+      () => abrirCliente(
+        app,
+        tomador,
+        aba: aba,
+        slug: slug,
+        servicoDoLote: servicoDoLote,
+        aoConfirmarLote: aoConfirmarLote,
+      ),
     );
     return;
   }
@@ -152,7 +174,12 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
     }
   }
 
-  lerServicos(editando ? fs('documento') : '');
+  if (servicoDoLote != null && slug != null) {
+    servicos[slug] = Map<String, dynamic>.from(servicoDoLote);
+    ordem.add(slug);
+  } else {
+    lerServicos(editando ? fs('documento') : '');
+  }
   // Estado da janela: serviço em edição, se já é um cliente salvo e o documento salvo (o
   // Salvar NÃO fecha a janela: "novo cliente" vira "edição" depois do 1º salvar).
   var slugAtual = (slug != null && ordem.contains(slug))
@@ -161,7 +188,7 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
   bool temServico() => slugAtual.isNotEmpty && servicos.containsKey(slugAtual);
   var jaSalvo = editando;
   var docSalvo = editando ? soDoc(fs('documento')) : '';
-  var abaAtual = aba;
+  var abaAtual = emLote ? 1 : aba;
 
   String proximoSlug() {
     final usados = {...servicos.keys, ...removidos};
@@ -174,7 +201,13 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
 
   late final Dialogo d;
   d = Dialogo(
-    titulo: (_) => app.tituloComX(editando ? 'Editar cliente' : 'Novo cliente'),
+    titulo: (_) => app.tituloComX(
+      emLote
+          ? 'Serviço do lote · ${fs('xNome')}'
+          : editando
+          ? 'Editar cliente'
+          : 'Novo cliente',
+    ),
     largura: 760,
     alinhamentoAcoes: MainAxisAlignment.spaceBetween,
     conteudo: (_) => const SizedBox.shrink(),
@@ -402,6 +435,7 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
   // ---- campos do serviço (carregados/lidos por carregarServico/coletarServico) ------------ //
   final fServNome = d.texto();
   final fLocPrest = d.texto();
+  var plataformaDigital = false;
   final fTribNac = Catalogo('tribnac');
   final fNbs = Catalogo('nbs');
   d.aoDescartar(fTribNac.dd.dispose);
@@ -482,7 +516,7 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
   // "Salvar". São DUAS edições independentes. Cliente novo abre com os dados liberados;
   // o serviço só é criado e liberado ao clicar em "Novo serviço".
   var editaDados = !editando;
-  var editaServ = false;
+  var editaServ = emLote;
   // CST=00: percentuais de PIS/COFINS ZERADOS na tela e "incluir contribuições" desmarcado
   // (os valores reais ficam guardados aqui e voltam ao escolher um CST tributado).
   var pctZero = false;
@@ -649,37 +683,10 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
 
   void escolherVencimento(bool locacao) {
     final campo = locacao ? fLocVenc : fCondVenc;
-    var escolha = lerDataDoCampo(campo.text) ?? DateTime.now();
-    if (escolha.year < 1900 || escolha.year > 2199) escolha = DateTime.now();
-    late final Dialogo calendario;
-    calendario = Dialogo(
-      titulo: (_) => textoTitulo('Vencimento original'),
-      largura: 400,
-      conteudo: (_) => CalendarDatePicker(
-        initialDate: escolha,
-        firstDate: DateTime(1900),
-        lastDate: DateTime(2199, 12, 31),
-        onDateChanged: (v) {
-          escolha = v;
-        },
-      ),
-      acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(calendario)),
-        Botao(
-          'Selecionar',
-          icone: Icons.check,
-          aoClicar: () {
-            campo.text = dataIsoParaBr(
-              escolha.toIso8601String().substring(0, 10),
-            );
-            app.fecharEsta(calendario);
-            d.atualizar();
-          },
-        ),
-      ],
-      idLayout: 'Vencimento.calendario',
-    );
-    app.mostrarDialogo(calendario);
+    abrirVencimento(app, lerDataDoCampo(campo.text) ?? DateTime.now(), (data) {
+      campo.text = diaBr(data);
+      d.atualizar();
+    });
   }
 
   /// Preenche os campos de serviço + tributação a partir de um serviço.
@@ -712,6 +719,7 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
     ddRet.por(s('tpRetPisCofins'));
     ddIss.por(s('tribISSQN'));
     ddRetIss.por(s('tpRetISSQN'));
+    plataformaDigital = sf['rtc_plataforma_digital'] == true;
     ddRtcDest.por(s('rtc_indDest'));
     ddRtcIndOp.por(s('rtc_cIndOp'));
     ddRtcCst.por(s('rtc_CST'));
@@ -811,6 +819,7 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
     f['interm_IM'] = temIntermediario ? fIntermIm.text.trim() : '';
     f['xDescServ'] = _cima(fDesc.text);
     f['cNBS'] = (fNbs.dd.valor ?? '').trim();
+    f['rtc_plataforma_digital'] = plataformaDigital;
     f['rtc_indDest'] = ddRtcDest.valor ?? '';
     f['rtc_cIndOp'] = ddRtcIndOp.valor ?? '';
     f['rtc_CST'] = ddRtcCst.valor ?? '';
@@ -965,7 +974,8 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
             altura: TamanhosDadosCliente
                 .rotuloExcluirOServicoNomeServDesteClienteAExclusao
                 .altura,
-            idLayout: 'TamanhosDadosCliente.rotuloExcluirOServicoNomeServDesteClienteAExclusao',
+            idLayout:
+                'TamanhosDadosCliente.rotuloExcluirOServicoNomeServDesteClienteAExclusao',
           ),
           CampoTexto(
             controle: campo,
@@ -1085,9 +1095,40 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
   }
 
   // ---- salvar --------------------------------------------------------------------------------- //
-  void salvar() {
+  var salvandoLote = false;
+  Future<void> salvar() async {
     // Cliente já salvo: grava só o que a aba em edição cobre (dados OU serviços). Cliente
     // ainda não salvo: grava tudo de uma vez.
+    if (aoConfirmarLote != null) {
+      if (salvandoLote) return;
+      if (slugAtual != slug || !temServico()) {
+        app.toast(
+          'Edite o serviço deste lote na aba Serviço & Tributação.',
+          erro: true,
+        );
+        return;
+      }
+      final form = coletarServico();
+      final erros = ja<List>('cadastro.servico_validate', {
+        'form': form,
+        'prestador': p,
+        'require_rtc': false,
+      });
+      if (erros.isNotEmpty) {
+        app.toast('Corrija: ${erros.join('; ')}', erro: true);
+        return;
+      }
+      salvandoLote = true;
+      try {
+        if (await aoConfirmarLote(Map<String, dynamic>.from(form)) &&
+            d.aberto) {
+          app.fecharEsta(d);
+        }
+      } finally {
+        salvandoLote = false;
+      }
+      return;
+    }
     final tudo = !jaSalvo;
     final comDados = tudo || abaAtual == 0;
     final comServ = tudo || abaAtual == 1;
@@ -1399,7 +1440,8 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
               altura: TamanhosDadosCliente
                   .botaoEhCpfBuscaAutomaticaSoExisteParaCNPJCPF
                   .altura,
-              idLayout: 'TamanhosDadosCliente.botaoEhCpfBuscaAutomaticaSoExisteParaCNPJCPF',
+              idLayout:
+                  'TamanhosDadosCliente.botaoEhCpfBuscaAutomaticaSoExisteParaCNPJCPF',
             ),
           ],
           quebra: true,
@@ -1898,7 +1940,8 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
               pct: true,
               mascara: copropriedadeVirgula,
               dica: '100,00',
-              dicaMouse: 'Participação do locador: de 0 a 100%, com até duas casas decimais. Um único locador: 100%.',
+              dicaMouse:
+                  'Participação do locador: de 0 a 100%, com até duas casas decimais. Um único locador: 100%.',
             ),
           lin(
             [
@@ -1985,7 +2028,8 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
           altura: TamanhosServicosTributos
               .rotuloIdentifiqueAUnidadePeloCodigoCIBOuPelo
               .altura,
-          idLayout: 'TamanhosServicosTributos.rotuloIdentifiqueAUnidadePeloCodigoCIBOuPelo',
+          idLayout:
+              'TamanhosServicosTributos.rotuloIdentifiqueAUnidadePeloCodigoCIBOuPelo',
         ),
         lin(
           [
@@ -2001,7 +2045,8 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
               'Código CIB',
               TamanhosServicosTributos.campoCodigoCIB,
               travado: t,
-              dicaMouse: 'Identificador nacional do imóvel no Cadastro Imobiliário Brasileiro (7 caracteres + dígito verificador, ex.: A3N8Z4F-Y). Não é a matrícula nem a inscrição do IPTU. Se não tiver CIB, use o endereço.',
+              dicaMouse:
+                  'Identificador nacional do imóvel no Cadastro Imobiliário Brasileiro (7 caracteres + dígito verificador, ex.: A3N8Z4F-Y). Não é a matrícula nem a inscrição do IPTU. Se não tiver CIB, use o endereço.',
               // 9 = os 8 caracteres e o hífen opcional da máscara AAAAAAA-D; o núcleo remove o hífen.
               mascara: ate(9, maiusculo: true),
             ),
@@ -2262,7 +2307,8 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
             altura: TamanhosServicosTributos
                 .rotuloValorDaNotaDecimalBrlSomaDeCobrancasMapX
                 .altura,
-            idLayout: 'TamanhosServicosTributos.rotuloValorDaNotaDecimalBrlSomaDeCobrancasMapX',
+            idLayout:
+                'TamanhosServicosTributos.rotuloValorDaNotaDecimalBrlSomaDeCobrancasMapX',
           ),
         ],
         quebra: true,
@@ -2476,7 +2522,8 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
               TamanhosServicosTributos.campoLocalPrestacaoCMun,
               travado: t,
               mascara: soNumeros(7),
-              dicaMouse: 'Município onde a operação acontece. A cidade do prestador é só uma sugestão; na locação, use a cidade do imóvel.',
+              dicaMouse:
+                  'Município onde a operação acontece. A cidade do prestador é só uma sugestão; na locação, use a cidade do imóvel.',
             ),
             catalogo(fTribNac, 'Código de Tributação Nacional'),
             campo(
@@ -2485,7 +2532,8 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
               TamanhosServicosTributos.campoCTribMun,
               travado: t,
               rotuloNaBorda: 'Trib. Mun. (cTribMun)',
-              dicaMouse: 'Complemento municipal de 3 dígitos, quando fornecido pela prefeitura. Na locação sem ISSQN, deixe em branco. Não use 000.',
+              dicaMouse:
+                  'Complemento municipal de 3 dígitos, quando fornecido pela prefeitura. Na locação sem ISSQN, deixe em branco. Não use 000.',
             ),
             catalogo(fNbs, 'Item da NBS'),
           ],
@@ -2625,6 +2673,16 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
         ),
         divisor(),
         negrito('IBS/CBS'),
+        Marcar(
+          valor: plataformaDigital,
+          rotulo:
+              'Operação abrangida pelo art. 22 da LC 214/2025 (plataforma digital)',
+          desabilitado: t,
+          aoMudar: (v) {
+            plataformaDigital = v ?? false;
+            d.atualizar();
+          },
+        ),
         lin(
           [
             lista(
@@ -2812,107 +2870,119 @@ void abrirCliente(App app, String? tomador, {int aba = 0, String? slug}) {
 
   d.conteudo = (_) => SizedBox(
     height: 520,
-    child: Abas(
-      inicial: aba,
-      rotulos: const [
-        ('Dados do cliente', Icons.person),
-        ('Serviço & Tributação', Icons.account_balance),
-      ],
-      // "Excluir cliente" só na aba Dados; "Excluir serviço" só na aba Serviço & Tributação.
-      // Editar/Salvar acompanham a aba: cada uma tem a própria edição.
-      aoMudar: (i) {
-        abaAtual = i == 1 ? 1 : 0;
-        d.atualizar();
-      },
-      paineis: [painel(abaDados()), painel(abaServico())],
-    ),
+    child: emLote
+        ? painel(abaServico())
+        : Abas(
+            inicial: aba,
+            rotulos: const [
+              ('Dados do cliente', Icons.person),
+              ('Serviço & Tributação', Icons.account_balance),
+            ],
+            // "Excluir cliente" só na aba Dados; "Excluir serviço" só na aba Serviço & Tributação.
+            // Editar/Salvar acompanham a aba: cada uma tem a própria edição.
+            aoMudar: (i) {
+              abaAtual = i == 1 ? 1 : 0;
+              d.atualizar();
+            },
+            paineis: [painel(abaDados()), painel(abaServico())],
+          ),
   );
-  d.acoes = (_) => [
-    lin(
-      [
-        if (abaAtual == 0 && jaSalvo)
-          Botao.contorno(
-            'Excluir cliente',
-            icone: Icons.delete_forever,
-            cor: Colors.red.shade700,
-            aoClicar: () => app.exigirPermissao(
-              'clientes.excluir',
-              () => _confirmarExcluirCliente(app, docSalvo, _cima(fNome.text)),
-            ),
-            largura: TamanhosServicosTributos.botaoExcluirCliente.largura,
-            altura: TamanhosServicosTributos.botaoExcluirCliente.altura,
-            idLayout: 'TamanhosServicosTributos.botaoExcluirCliente',
+  d.acoes = (_) => emLote
+      ? [
+          Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
+          Botao('Confirmar alterações', icone: Icons.check, aoClicar: salvar),
+        ]
+      : [
+          lin(
+            [
+              if (abaAtual == 0 && jaSalvo)
+                Botao.contorno(
+                  'Excluir cliente',
+                  icone: Icons.delete_forever,
+                  cor: Colors.red.shade700,
+                  aoClicar: () => app.exigirPermissao(
+                    'clientes.excluir',
+                    () => _confirmarExcluirCliente(
+                      app,
+                      docSalvo,
+                      _cima(fNome.text),
+                    ),
+                  ),
+                  largura: TamanhosServicosTributos.botaoExcluirCliente.largura,
+                  altura: TamanhosServicosTributos.botaoExcluirCliente.altura,
+                  idLayout: 'TamanhosServicosTributos.botaoExcluirCliente',
+                ),
+              if (abaAtual == 1 && !editaServ)
+                Botao.contorno(
+                  'Excluir serviço',
+                  desabilitado: !temServico(),
+                  icone: Icons.delete_outline,
+                  cor: Colors.red.shade700,
+                  aoClicar: pedirExcluirServico,
+                  largura: TamanhosServicosTributos.botaoExcluirServico.largura,
+                  altura: TamanhosServicosTributos.botaoExcluirServico.altura,
+                  idLayout: 'TamanhosServicosTributos.botaoExcluirServico',
+                ),
+              // Em edição o lugar é do "Cancelar" (cliente ainda não salvo não tem para onde voltar:
+              // ali quem desiste fecha a janela).
+              if (abaAtual == 1 && editaServ && jaSalvo)
+                Botao.contorno(
+                  'Cancelar',
+                  icone: Icons.close,
+                  aoClicar: cancelarServico,
+                  largura: TamanhosServicosTributos.botaoCancelar.largura,
+                  altura: TamanhosServicosTributos.botaoCancelar.altura,
+                  idLayout: 'TamanhosServicosTributos.botaoCancelar',
+                ),
+            ],
+            espaco: 8,
+            justa: true,
+            idLayout: 'Grupo.cliente_form.lin.28',
           ),
-        if (abaAtual == 1 && !editaServ)
-          Botao.contorno(
-            'Excluir serviço',
-            desabilitado: !temServico(),
-            icone: Icons.delete_outline,
-            cor: Colors.red.shade700,
-            aoClicar: pedirExcluirServico,
-            largura: TamanhosServicosTributos.botaoExcluirServico.largura,
-            altura: TamanhosServicosTributos.botaoExcluirServico.altura,
-            idLayout: 'TamanhosServicosTributos.botaoExcluirServico',
+          lin(
+            [
+              // Editar <-> Salvar alternam conforme o modo DA ABA à vista.
+              if (!abaEmEdicao())
+                Botao.contorno(
+                  'Editar',
+                  desabilitado: abaAtual == 1 && !temServico(),
+                  icone: Icons.edit,
+                  aoClicar: () => app.exigirPermissao(
+                    abaAtual == 1 ? 'clientes.servicos' : 'clientes.editar',
+                    () {
+                      // Só a aba à vista entra em edição; a outra continua como estava.
+                      if (abaAtual == 1) {
+                        editaServ = true;
+                      } else {
+                        editaDados = true;
+                      }
+                      acertar();
+                    },
+                  ),
+                  largura: TamanhosServicosTributos.botaoEditar.largura,
+                  altura: TamanhosServicosTributos.botaoEditar.altura,
+                  idLayout: 'TamanhosServicosTributos.botaoEditar',
+                ),
+              if (abaEmEdicao())
+                Botao(
+                  'Salvar',
+                  icone: Icons.save,
+                  aoClicar: salvar,
+                  largura: TamanhosServicosTributos.botaoSalvar.largura,
+                  altura: TamanhosServicosTributos.botaoSalvar.altura,
+                  idLayout: 'TamanhosServicosTributos.botaoSalvar',
+                ),
+            ],
+            espaco: 8,
+            justa: true,
+            idLayout: 'Grupo.cliente_form.lin.29',
           ),
-        // Em edição o lugar é do "Cancelar" (cliente ainda não salvo não tem para onde voltar:
-        // ali quem desiste fecha a janela).
-        if (abaAtual == 1 && editaServ && jaSalvo)
-          Botao.contorno(
-            'Cancelar',
-            icone: Icons.close,
-            aoClicar: cancelarServico,
-            largura: TamanhosServicosTributos.botaoCancelar.largura,
-            altura: TamanhosServicosTributos.botaoCancelar.altura,
-            idLayout: 'TamanhosServicosTributos.botaoCancelar',
-          ),
-      ],
-      espaco: 8,
-      justa: true,
-      idLayout: 'Grupo.cliente_form.lin.28',
-    ),
-    lin(
-      [
-        // Editar <-> Salvar alternam conforme o modo DA ABA à vista.
-        if (!abaEmEdicao())
-          Botao.contorno(
-            'Editar',
-            desabilitado: abaAtual == 1 && !temServico(),
-            icone: Icons.edit,
-            aoClicar: () => app.exigirPermissao(
-              abaAtual == 1 ? 'clientes.servicos' : 'clientes.editar',
-              () {
-                // Só a aba à vista entra em edição; a outra continua como estava.
-                if (abaAtual == 1) {
-                  editaServ = true;
-                } else {
-                  editaDados = true;
-                }
-                acertar();
-              },
-            ),
-            largura: TamanhosServicosTributos.botaoEditar.largura,
-            altura: TamanhosServicosTributos.botaoEditar.altura,
-            idLayout: 'TamanhosServicosTributos.botaoEditar',
-          ),
-        if (abaEmEdicao())
-          Botao(
-            'Salvar',
-            icone: Icons.save,
-            aoClicar: salvar,
-            largura: TamanhosServicosTributos.botaoSalvar.largura,
-            altura: TamanhosServicosTributos.botaoSalvar.altura,
-            idLayout: 'TamanhosServicosTributos.botaoSalvar',
-          ),
-      ],
-      espaco: 8,
-      justa: true,
-      idLayout: 'Grupo.cliente_form.lin.29',
-    ),
-  ];
+        ];
   // Esc com um cadastro JÁ SALVO em edição: descarta o que não foi salvo e volta ao modo só
   // leitura — reabre a janela a partir do que está gravado, na mesma aba e no mesmo serviço.
   // Cliente ainda não salvo não tem leitura para onde voltar: ali o Esc fecha.
   d.escCancelaEdicao = () {
+    if (emLote) return false;
     if (!((editaDados || editaServ) && jaSalvo && docSalvo.isNotEmpty))
       return false;
     final (doc, abaDeAgora, slugDeAgora) = (docSalvo, abaAtual, slugAtual);
@@ -2976,7 +3046,8 @@ void _confirmarExcluirCliente(App app, String doc, String nome) {
           altura: TamanhosServicosTributos
               .rotuloExcluirOCADASTRODoClienteNomeFormatarDocumentoDoc
               .altura,
-          idLayout: 'TamanhosServicosTributos.rotuloExcluirOCADASTRODoClienteNomeFormatarDocumentoDoc',
+          idLayout:
+              'TamanhosServicosTributos.rotuloExcluirOCADASTRODoClienteNomeFormatarDocumentoDoc',
         ),
         Tx(
           'As NFS-e já emitidas deste cliente são MANTIDAS — só o cadastro é removido '

@@ -1,5 +1,5 @@
 //! Consulta e exportações do sistema, com o mesmo filtro e conteúdo do Python.
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::Path;
 
@@ -12,14 +12,15 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::cofre::{self, Filtro, Nota};
 use crate::despacho::Avisar;
 use crate::erro::{Erro, Res};
-use crate::{cadastro, danfse, texto};
+use crate::{cadastro, danfse, lotes, texto};
 
-pub const CAB: [&str; 11] = [
+pub const CAB: [&str; 12] = [
     "NFS-e",
     "Cliente",
     "Documento",
     "Grupo",
     "Processada em",
+    "Competência",
     "Ambiente",
     "Status",
     "vServ",
@@ -47,6 +48,7 @@ pub struct Opcoes {
     pub incluir_danfse: bool,
     pub incluir_eventos: bool,
     pub formatos: Vec<String>,
+    pub por_competencia: bool,
     pub por_mes: bool,
     pub por_tipo: bool,
 }
@@ -66,6 +68,7 @@ impl Default for Opcoes {
             incluir_danfse: false,
             incluir_eventos: false,
             formatos: Vec::new(),
+            por_competencia: false,
             por_mes: false,
             por_tipo: false,
         }
@@ -118,7 +121,7 @@ fn registro(n: Nota, grupos: &HashMap<String, String>) -> Registro {
         grupo,
         nDPS: String::new(),
         serie: String::new(),
-        dCompet: n.dt,
+        dCompet: n.dCompet,
         tpAmb: n.amb,
         nota_id: n.id,
         cancelada: n.cancelada,
@@ -135,6 +138,7 @@ pub fn pagina(prestador: &str, o: &Opcoes, limite: i64, offset: i64) -> Res<(i64
     let mapa = grupos.iter().cloned().collect();
     let filtro = Filtro {
         origem: "local".into(),
+        por_competencia: o.por_competencia,
         docs: o.tomadores.clone(),
         ini: o.ini.clone(),
         fim: o.fim.clone(),
@@ -183,6 +187,7 @@ pub fn linha(r: &Registro) -> Vec<String> {
         texto::format_documento(&r.tomador),
         r.grupo.clone(),
         datahora(&r.dhProc),
+        r.dCompet.clone(),
         r.ambiente_label.clone(),
         status(r.cancelada, &r.subst_por, &r.cStat),
         texto::fmt_money_br(&r.vServ),
@@ -234,11 +239,11 @@ fn gravar<T>(destino: &Path, f: impl FnOnce(&Path) -> Res<T>) -> Res<T> {
         chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
     ));
     let r = f(&tmp).and_then(|v| {
-        std::fs::rename(&tmp, destino)?;
+        crate::caminhos::arquivo_usuario(|| std::fs::rename(&tmp, destino))?;
         Ok(v)
     });
     if r.is_err() {
-        let _ = std::fs::remove_file(&tmp);
+        let _ = crate::caminhos::arquivo_usuario(|| std::fs::remove_file(&tmp));
     }
     r
 }
@@ -272,6 +277,7 @@ fn xlsx(
     linhas: &[Vec<String>],
     numeros: &[(usize, Vec<f64>)],
     larguras: &[f64],
+    formulas: bool,
 ) -> Res<Vec<u8>> {
     let mut wb = Workbook::new();
     let ws = wb.add_worksheet();
@@ -287,9 +293,12 @@ fn xlsx(
     for (i, linha) in linhas.iter().enumerate() {
         for (c, t) in linha.iter().enumerate() {
             let r = (i + 1) as u32;
+            if !formulas && t.is_empty() {
+                continue;
+            }
             if let Some((_, ns)) = numeros.iter().find(|(col, _)| *col == c) {
                 ws.write_number(r, c as u16, ns[i]).map_err(erro_xlsx)?;
-            } else if t.starts_with('=') && t.len() > 1 {
+            } else if formulas && t.starts_with('=') && t.len() > 1 {
                 ws.write_formula(r, c as u16, Formula::new(t).set_result(""))
                     .map_err(erro_xlsx)?;
             } else if !t.is_empty() {
@@ -326,17 +335,18 @@ pub fn exportar(
             &linhas,
             &[
                 (
-                    7,
+                    8,
                     rs.iter().map(|r| r.vServ.parse().unwrap_or(0.0)).collect(),
                 ),
                 (
-                    8,
+                    9,
                     rs.iter().map(|r| r.vLiq.parse().unwrap_or(0.0)).collect(),
                 ),
             ],
             &[
-                12.0, 36.0, 20.0, 16.0, 20.0, 14.0, 10.0, 14.0, 14.0, 52.0, 10.0,
+                12.0, 36.0, 20.0, 16.0, 20.0, 14.0, 14.0, 10.0, 14.0, 14.0, 52.0, 10.0,
             ],
+            true,
         )?,
         "pdf" => {
             let pf = cadastro::get_prestador_form(prestador)?;
@@ -354,7 +364,8 @@ pub fn exportar(
                 (format!("Prestador: {prest}"), "sub".into()),
                 (
                     format!(
-                        "Período: {} a {}",
+                        "Período por {}: {} a {}",
+                        if o.por_competencia { "competência" } else { "emissão" },
                         data_br(&o.ini, "início"),
                         data_br(&o.fim, "hoje")
                     ),
@@ -375,6 +386,7 @@ pub fn exportar(
                 filtros.push(format!("Por busca (“{}”)", o.termo.trim()));
             }
             let sem_filtros = Opcoes {
+                por_competencia: o.por_competencia,
                 ini: o.ini.clone(),
                 fim: o.fim.clone(),
                 ..Default::default()
@@ -393,10 +405,10 @@ pub fn exportar(
                 &CAB,
                 &linhas,
                 &[
-                    36.0, 136.0, 76.0, 70.0, 74.0, 56.0, 46.0, 56.0, 56.0, 126.0, 46.0,
+                    36.0, 136.0, 76.0, 70.0, 74.0, 60.0, 56.0, 46.0, 56.0, 56.0, 126.0, 46.0,
                 ],
                 &topo,
-                &[1, 3, 9],
+                &[1, 3, 10],
                 "NFS-e emitidas",
                 a.cancelar,
             )?
@@ -409,7 +421,7 @@ pub fn exportar(
     };
     a.verificar()?;
     gravar(destino, |p| {
-        std::fs::write(p, dados)?;
+        crate::caminhos::arquivo_usuario(|| std::fs::write(p, dados))?;
         Ok(rs.len())
     })
 }
@@ -447,7 +459,7 @@ pub fn exportar_xmls(
     let rs = registros(prestador, &simples)?;
     gravar(destino, |p| {
         let leitor = cofre::LeitorXml::novo()?;
-        let mut zf = ZipWriter::new(std::fs::File::create(p)?);
+        let mut zf = ZipWriter::new(crate::caminhos::arquivo_usuario(|| std::fs::File::create(p))?);
         let mut ns = (0, 0, 0);
         for (i, r) in rs.iter().enumerate() {
             a.passo(i, rs.len())?;
@@ -488,6 +500,7 @@ pub fn exportar_xmls(
 
 fn filtro_cofre(o: &Opcoes, limite: i64) -> Filtro {
     Filtro {
+        por_competencia: o.por_competencia,
         papel: o.papel.clone(),
         amb: o.ambiente.clone(),
         ini: o.ini.clone(),
@@ -515,11 +528,10 @@ fn pasta(n: &Nota, o: &Opcoes) -> (String, String) {
             String::new()
         },
         if o.por_mes {
-            if n.dt.len() >= 7 {
-                n.dt[..7].into()
-            } else {
-                "sem-data".into()
-            }
+            let data = if o.por_competencia { &n.dCompet } else { &n.dt };
+            texto::parse_iso_date(data)
+                .map(|data| data.format("%Y-%m").to_string())
+                .unwrap_or_else(|| "sem-data".into())
         } else {
             String::new()
         },
@@ -532,7 +544,7 @@ fn prefixo(tipo: &str, mes: &str) -> String {
         .map(|s| format!("{s}/"))
         .collect()
 }
-fn cab_cofre(tipo: &str) -> [&str; 10] {
+fn cab_cofre(tipo: &str) -> [&str; 11] {
     [
         "Tipo",
         "NFS-e",
@@ -543,6 +555,7 @@ fn cab_cofre(tipo: &str) -> [&str; 10] {
         },
         "CNPJ / CPF",
         "Processada em",
+        "Competência",
         "Ambiente",
         "Status",
         "vServ",
@@ -557,6 +570,7 @@ fn linha_cofre(n: &Nota) -> Vec<String> {
         n.outro_nome().into(),
         texto::format_documento(n.outro_doc()),
         datahora(&n.dhProc),
+        n.dCompet.clone(),
         cadastro::ambiente_rotulo(&n.amb).unwrap_or(&n.amb).into(),
         status(n.cancelada, &n.subst_por, &n.cStat),
         texto::fmt_money_br(&format!("{:.2}", n.vServ)),
@@ -596,6 +610,7 @@ pub fn exportar_cofre(prestador: &str, destino: &Path, o: &Opcoes, a: &Acompanha
             cadastro::ambiente_rotulo(&o.ambiente).unwrap_or(&o.ambiente)
         ));
     }
+    filtros.push(if o.por_competencia { "Período por competência" } else { "Período por emissão/processamento" }.into());
     if !o.situacao.is_empty() {
         filtros.push(format!(
             "Só as {}",
@@ -611,7 +626,7 @@ pub fn exportar_cofre(prestador: &str, destino: &Path, o: &Opcoes, a: &Acompanha
     }
     let doc = texto::only_doc(prestador);
     gravar(destino, |p| {
-        let mut zf = ZipWriter::new(std::fs::File::create(p)?);
+        let mut zf = ZipWriter::new(crate::caminhos::arquivo_usuario(|| std::fs::File::create(p))?);
         if o.incluir_xml || o.incluir_danfse || o.incluir_eventos {
             let leitor = cofre::LeitorXml::novo()?;
             let tipos = [
@@ -683,10 +698,11 @@ pub fn exportar_cofre(prestador: &str, destino: &Path, o: &Opcoes, a: &Acompanha
                         &cab,
                         &linhas,
                         &[
-                            (7, ns.iter().map(|n| n.vServ).collect()),
-                            (8, ns.iter().map(|n| n.vLiq).collect()),
+                            (8, ns.iter().map(|n| n.vServ).collect()),
+                            (9, ns.iter().map(|n| n.vLiq).collect()),
                         ],
-                        &[11.0, 12.0, 40.0, 20.0, 20.0, 14.0, 13.0, 14.0, 14.0, 52.0],
+                        &[11.0, 12.0, 40.0, 20.0, 20.0, 14.0, 14.0, 13.0, 14.0, 14.0, 52.0],
+                        true,
                     )?,
                     _ => {
                         let pf = cadastro::get_prestador_form(prestador)?;
@@ -723,9 +739,9 @@ pub fn exportar_cofre(prestador: &str, destino: &Path, o: &Opcoes, a: &Acompanha
                         crate::relatorio_pdf::gerar(
                             &cab,
                             &linhas,
-                            &[44.0, 36.0, 170.0, 78.0, 74.0, 56.0, 56.0, 56.0, 56.0, 152.0],
+                            &[44.0, 36.0, 170.0, 78.0, 74.0, 60.0, 56.0, 56.0, 56.0, 56.0, 152.0],
                             &topo,
-                            &[2, 9],
+                            &[2, 10],
                             "NFS-e do Cofre",
                             a.cancelar,
                         )?
@@ -752,11 +768,280 @@ pub fn exportar_cofre(prestador: &str, destino: &Path, o: &Opcoes, a: &Acompanha
     })
 }
 
+const CAB_LOTES: [&str; 10] = [
+    "Lote",
+    "Emissão do lote",
+    "Ambiente",
+    "Status do lote",
+    "Cliente",
+    "Serviço",
+    "Competência",
+    "Valor serviço",
+    "Situação da nota",
+    "NFS-e",
+];
+const LARGURAS_LOTES: [f64; 10] = [
+    110.0, 84.0, 64.0, 61.0, 125.0, 107.0, 61.0, 63.0, 87.0, 45.0,
+];
+
+fn datahora_lote(s: &str) -> String {
+    let padrao = "%d/%m/%Y - %H:%M";
+    if let Ok(data) = chrono::DateTime::parse_from_rfc3339(s) {
+        return data
+            .with_timezone(&chrono::Local)
+            .format(padrao)
+            .to_string();
+    }
+    chrono::NaiveDateTime::parse_from_str(&s.replace('T', " "), "%Y-%m-%d %H:%M:%S%.f")
+        .map(|data| data.format(padrao).to_string())
+        .unwrap_or_else(|_| "Sem data registrada".into())
+}
+
+fn situacao_lote(estado: &str, concluido: bool) -> &'static str {
+    match estado {
+        "emitida" => "Emitida",
+        "fila" => "Em contingência",
+        "falhou" => "Falhou",
+        "conferir" | "enviando" => "Envio a conferir",
+        "removida" => "Removida",
+        _ if concluido => "Encerrada sem envio",
+        _ => "Aguardando",
+    }
+}
+
+fn csv_lotes(linhas: &[Vec<String>]) -> Vec<u8> {
+    let mut linhas = linhas.to_vec();
+    for linha in &mut linhas {
+        // Nomes livres permanecem texto quando o CSV é aberto em planilhas.
+        for i in [0, 4, 5, 9] {
+            if linha[i].trim_start().starts_with(['=', '+', '-', '@']) {
+                linha[i].insert(0, '\'');
+            }
+        }
+    }
+    csv(&CAB_LOTES, &linhas)
+}
+
+pub fn exportar_registros_lotes(
+    prestador: &str,
+    ids: &[String],
+    destino: &Path,
+    o: &Opcoes,
+    a: &Acompanhar,
+) -> Res<Value> {
+    if ids.is_empty() {
+        return Err(Erro::valor(
+            "Selecione ao menos um registro de emissão em lote.",
+        ));
+    }
+    let anexos = o.incluir_xml || o.incluir_danfse;
+    if !anexos && o.formatos.is_empty() {
+        return Err(Erro::valor("Selecione ao menos um formato ou documento."));
+    }
+    if let Some(fmt) = o
+        .formatos
+        .iter()
+        .find(|f| !["pdf", "xlsx", "csv"].contains(&f.as_str()))
+    {
+        return Err(Erro::valor(format!(
+            "Formato de relatório desconhecido: {fmt}"
+        )));
+    }
+    a.verificar()?;
+    a.etapa("Carregando registros de emissão em lote…", true);
+    let registros = lotes::registros_exportaveis(prestador, ids)?;
+    let total: usize = registros.iter().map(|r| r.lote.linhas.len()).sum();
+    let clientes: HashMap<_, _> = if o.formatos.is_empty() {
+        HashMap::new()
+    } else {
+        cadastro::list_tomadores(prestador)?
+            .into_iter()
+            .map(|c| (c.documento, c.display))
+            .collect()
+    };
+    let leitor = cofre::LeitorXml::novo()?;
+
+    gravar(destino, |p| {
+        let mut zip = ZipWriter::new(crate::caminhos::arquivo_usuario(|| {
+            std::fs::File::create(p)
+        })?);
+        let (mut n_xml, mut n_danfse, mut sem_xml, mut feito, mut n_relatorios) = (0, 0, 0, 0, 0);
+        let mut anexados = HashSet::new();
+        let mut linhas = Vec::new();
+        a.etapa("Preparando dados dos lotes…", false);
+        for r in &registros {
+            let resultados: HashMap<_, _> = r
+                .historico
+                .iter()
+                .filter(|h| h["ambiente"] == r.ambiente)
+                .filter_map(|h| Some(((h["linha"].as_str()?, h["competencia"].as_str()?), h)))
+                .collect();
+            let data = datahora_lote(&r.criado);
+            let ambiente = cadastro::ambiente_rotulo(&r.ambiente).unwrap_or(&r.ambiente);
+            let anteriores = r.lote.nome.ends_with("(histórico anterior)");
+            for l in &r.lote.linhas {
+                a.passo(feito, total)?;
+                feito += 1;
+                let h = resultados
+                    .get(&(l.id.as_str(), l.competencia.as_str()))
+                    .copied();
+                let estado = h.and_then(|h| h["estado"].as_str()).unwrap_or("");
+                let resultado = h.map(|h| &h["resultado"]).unwrap_or(&Value::Null);
+                let chave = lotes::chave_nfse_resultado(resultado);
+                let nota = match (estado, chave) {
+                    ("emitida", Some(chave)) => leitor
+                        .nota(prestador, chave)?
+                        .filter(|n| n.papel == cofre::PAPEL_EMITIDA && n.amb == r.ambiente),
+                    _ => None,
+                };
+                if anexos && estado == "emitida" {
+                    if let Some(nota) = &nota {
+                        if anexados.insert(nota.id) {
+                            if let Some(xml) = leitor.xml_disponivel(nota.id)? {
+                                if o.incluir_xml {
+                                    anexar(&mut zip, &format!("xml/{}.xml", nota.chave), &xml)?;
+                                    n_xml += 1;
+                                }
+                                if o.incluir_danfse {
+                                    anexar(
+                                        &mut zip,
+                                        &format!("danfse/{}.pdf", nota.chave),
+                                        &danfse::gerar(
+                                            &xml,
+                                            nota.cancelada,
+                                            !nota.subst_por.is_empty(),
+                                        )?,
+                                    )?;
+                                    n_danfse += 1;
+                                }
+                            } else {
+                                sem_xml += 1;
+                            }
+                        }
+                    } else {
+                        sem_xml += 1;
+                    }
+                }
+                if !o.formatos.is_empty() {
+                    let cliente = clientes.get(&l.tomador).cloned().unwrap_or_else(|| {
+                        let doc = texto::format_documento(&l.tomador);
+                        match nota.as_ref().map(|n| n.toma_nome.as_str()) {
+                            Some(nome) if !nome.is_empty() => format!("{nome} — {doc}"),
+                            _ => doc,
+                        }
+                    });
+                    let situacao = situacao_lote(estado, r.concluida);
+                    let numero = if estado == "emitida" {
+                        nota.as_ref()
+                            .map(|n| n.nNFSe.as_str())
+                            .or_else(|| lotes::numero_nfse_resultado(resultado))
+                            .unwrap_or("")
+                    } else {
+                        ""
+                    };
+                    linhas.push(vec![
+                        r.lote.nome.clone(),
+                        data.clone(),
+                        ambiente.into(),
+                        if r.concluida {
+                            "Concluído"
+                        } else {
+                            "Pendente"
+                        }
+                        .into(),
+                        cliente,
+                        if anteriores {
+                            "Valores não preservados".into()
+                        } else if l.form.nome.is_empty() {
+                            l.servico.clone()
+                        } else {
+                            l.form.nome.clone()
+                        },
+                        data_br(&l.competencia, ""),
+                        if anteriores {
+                            String::new()
+                        } else {
+                            texto::fmt_money_br(&l.form.vServ)
+                        },
+                        if l.editada {
+                            format!("{situacao} (dados editados)")
+                        } else {
+                            situacao.into()
+                        },
+                        numero.into(),
+                    ]);
+                }
+            }
+        }
+        a.fim(total);
+        for fmt in ["pdf", "xlsx", "csv"]
+            .into_iter()
+            .filter(|f| o.formatos.iter().any(|s| s == f))
+        {
+            a.verificar()?;
+            a.etapa(&format!("Gerando relatório (.{fmt})…"), true);
+            let dados = match fmt {
+                "pdf" => {
+                    let pf = cadastro::get_prestador_form(prestador)?;
+                    let titulo = "Registros de emissão em lote";
+                    let topo = [
+                        (titulo.into(), "titulo".into()),
+                        ("4".into(), "espaco".into()),
+                        (
+                            format!("{} — {}", pf.xNome, texto::format_documento(prestador)),
+                            "sub".into(),
+                        ),
+                        (
+                            format!("{} lote(s) · {} linha(s)", registros.len(), total),
+                            "sub".into(),
+                        ),
+                    ];
+                    crate::relatorio_pdf::gerar(
+                        &CAB_LOTES,
+                        &linhas,
+                        &LARGURAS_LOTES,
+                        &topo,
+                        &[0, 4, 5, 8],
+                        titulo,
+                        a.cancelar,
+                    )?
+                }
+                "xlsx" => xlsx(
+                    &CAB_LOTES,
+                    &linhas,
+                    &[(
+                        7,
+                        linhas
+                            .iter()
+                            .map(|l| texto::decimal(&l[7].replace('.', "")).unwrap_or_default())
+                            .collect(),
+                    )],
+                    &LARGURAS_LOTES.map(|w| w / 4.5),
+                    false,
+                )?,
+                _ => csv_lotes(&linhas),
+            };
+            anexar(&mut zip, &format!("relatorio-lotes.{fmt}"), &dados)?;
+            n_relatorios += 1;
+        }
+        if n_xml + n_danfse + n_relatorios == 0 {
+            return Err(Erro::valor(
+                "Nenhuma NFS-e dos registros escolhidos tem XML disponível no Cofre.",
+            ));
+        }
+        a.verificar()?;
+        zip.finish().map_err(erro_zip)?;
+        Ok(
+            json!({"lotes":registros.len(),"relatorios":n_relatorios,"xml":n_xml,"danfse":n_danfse,"sem_xml":sem_xml}),
+        )
+    })
+}
+
 pub fn zip_anexar(destino: &Path, arquivo: &Path, nome: &str) -> Res<()> {
     gravar(destino, |tmp| {
-        let mut zf = ZipWriter::new(std::fs::File::create(tmp)?);
-        if destino.exists() {
-            let mut anterior = ZipArchive::new(std::fs::File::open(destino)?).map_err(erro_zip)?;
+        let mut zf = ZipWriter::new(crate::caminhos::arquivo_usuario(|| std::fs::File::create(tmp))?);
+        if crate::caminhos::arquivo_usuario::<_, std::io::Error>(|| Ok(destino.exists()))? {
+            let mut anterior = ZipArchive::new(crate::caminhos::arquivo_usuario(|| std::fs::File::open(destino))?).map_err(erro_zip)?;
             for i in 0..anterior.len() {
                 let mut arq = anterior.by_index(i).map_err(erro_zip)?;
                 let nome = arq.name().map(|n| n.to_string()).unwrap_or_default();
@@ -765,7 +1050,7 @@ pub fn zip_anexar(destino: &Path, arquivo: &Path, nome: &str) -> Res<()> {
                 anexar(&mut zf, &nome, &bytes)?;
             }
         }
-        anexar(&mut zf, nome, &std::fs::read(arquivo)?)?;
+        anexar(&mut zf, nome, &crate::caminhos::arquivo_usuario(|| std::fs::read(arquivo))?)?;
         zf.finish().map_err(erro_zip)?;
         Ok(())
     })
