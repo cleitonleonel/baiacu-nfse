@@ -77,30 +77,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     info.lpFile = helper.c_str();
     info.lpParameters = L"--recover";
     info.nShow = SW_HIDE;
-    if (!ShellExecuteExW(&info) || !info.hProcess) return EXIT_SUCCESS;
-    WaitForSingleObject(info.hProcess, INFINITE);
-    DWORD result = 1;
-    GetExitCodeProcess(info.hProcess, &result);
-    CloseHandle(info.hProcess);
-    if (result != 0 || GetFileAttributesW((directory + L"\\update.pending").c_str()) != INVALID_FILE_ATTRIBUTES) return EXIT_SUCCESS;
-    // Reinicia o executável já restaurado, na sessão e com os privilégios originais.
-    ShellExecuteW(nullptr, L"open", exe_path, nullptr, directory.c_str(), SW_SHOWNORMAL);
+    // O recuperador precisa SUBSTITUIR este executável: esperar por ele aqui manteria o .exe em
+    // uso e a recuperação falharia com "Acesso negado" (os error 5). Este processo sai já.
+    info.fMask = 0;
+    // Nem uma mensagem aqui: ela seguraria o processo. O recuperador avisa quando terminar.
+    ShellExecuteExW(&info);
     return EXIT_SUCCESS;
   }
-  const bool installed = GetFileAttributesW((directory + L"\\installed.marker").c_str()) != INVALID_FILE_ATTRIBUTES;
-  if (installed) {
-    // Instalações anteriores precisam do setup para registrar o novo serviço.
-    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-    SC_HANDLE dados = scm ? OpenServiceW(scm, L"BaiacuNFSeDados", SERVICE_QUERY_STATUS) : nullptr;
-    if (dados) CloseServiceHandle(dados);
-    if (scm) CloseServiceHandle(scm);
-    if (!dados) {
-      if (!oculta) MessageBoxW(nullptr,
-          L"Execute o instalador desta versão para registrar o serviço Baiacu NFSe - Dados.",
-          L"Baiacu NFS-e", MB_OK | MB_ICONINFORMATION);
-      return EXIT_FAILURE;
-    }
-  }
+  // Sem o serviço Baiacu NFSe - Dados (instalação 1.0.0.2 atualizada pelo atualizador automático,
+  // que não registra serviços), o programa abre no modelo anterior: os bancos de ProgramData são
+  // abertos no próprio processo. O núcleo decide isso sozinho (dados_windows::servico_registrado).
+  // Bloquear aqui fazia a conferência de partida do atualizador falhar e a atualização ser desfeita.
   StartupGuard starting;
   if (starting.duplicate()) return EXIT_SUCCESS;
   wchar_t reabrir_env[8] = {};

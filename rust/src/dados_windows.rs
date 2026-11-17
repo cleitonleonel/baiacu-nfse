@@ -119,7 +119,17 @@ pub(crate) fn cliente_instalado() -> bool {
         caminhos::instalado_compartilhado()
             && std::env::args_os().nth(1).as_deref()
                 != Some(OsStr::new("--baiacu-validar-inicializacao"))
+            && servico_registrado()
     })
+}
+
+/// O serviço de dados existe nesta máquina. Uma instalação 1.0.0.2 atualizada pelo atualizador
+/// automático (que não registra serviços) fica sem ele até alguém rodar o instalador: nesse caso
+/// o programa segue no modelo anterior, abrindo os bancos de ProgramData no próprio processo.
+pub(crate) fn servico_registrado() -> bool {
+    ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .and_then(|scm| scm.open_service(SERVICO, ServiceAccess::QUERY_STATUS))
+        .is_ok()
 }
 
 pub(crate) fn metodo_local(metodo: &str) -> bool {

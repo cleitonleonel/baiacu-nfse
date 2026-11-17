@@ -36,7 +36,7 @@ use windows_sys::Win32::{
         OpenMutexW, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
         QueryFullProcessImageNameW, WaitForSingleObject,
     },
-    UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW},
+    UI::WindowsAndMessaging::{MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MessageBoxW},
 };
 
 define_windows_service!(entry, service_main);
@@ -80,6 +80,17 @@ impl Drop for UpdateGuard {
         }
     }
 }
+pub fn show_info(message: &str) {
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            wide(std::ffi::OsStr::new(message)).as_ptr(),
+            wide(std::ffi::OsStr::new("Atualização do Baiacu")).as_ptr(),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
+}
+
 pub fn show_error(message: &str) {
     unsafe {
         MessageBoxW(
@@ -817,7 +828,24 @@ pub fn run() -> Result<()> {
             if root.join("installed.marker").is_file() {
                 parar_dados(false)?;
             }
-            update::recover(&root)
+            // O programa que pediu a recuperação acabou de sair; o Windows pode levar um instante
+            // para soltar o executável dele. Tenta por até ~10 s antes de desistir.
+            let mut tentativa = 0;
+            loop {
+                match update::recover(&root) {
+                    Ok(()) => break,
+                    Err(_) if tentativa < 20 => {
+                        tentativa += 1;
+                        std::thread::sleep(Duration::from_millis(500));
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            // Chamado pelo programa (que já saiu), avisa; pelo instalador (--silencioso), não.
+            if args.get(2).map(String::as_str) != Some("--silencioso") {
+                show_info("A versão anterior do Baiacu foi restaurada. Pode abrir o programa de novo.");
+            }
+            Ok(())
         }
         Some("--remove") => {
             installed()?;

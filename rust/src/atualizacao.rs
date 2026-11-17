@@ -15,7 +15,7 @@ use crate::erro::{Erro, Res};
 use crate::rede::{Sessao, Tempo};
 
 /// Versão deste programa. `compilar_exe.py` confere que é a mesma do `pubspec.yaml`.
-pub const VERSAO: &str = "1.0.0.3";
+pub const VERSAO: &str = "1.0.0.4";
 /// Repositório onde saem as versões novas (dono/nome).
 pub const REPOSITORIO: &str = "williamlala/baiacu-nfse";
 /// Nome do executável do programa empacotado.
