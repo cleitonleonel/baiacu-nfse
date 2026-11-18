@@ -141,6 +141,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
+  // Desmonta o motor do Flutter aqui, fora de qualquer callback de janela, e só depois o COM.
+  window.Destroy();
   ::CoUninitialize();
   return EXIT_SUCCESS;
 }

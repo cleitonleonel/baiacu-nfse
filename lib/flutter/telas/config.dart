@@ -15,9 +15,10 @@ import 'package:flutter/services.dart';
 import '../app/app.dart';
 import '../app/atualizacao.dart';
 import '../app/doacao.dart' show BotaoContribuir;
+import '../app/logs.dart' show exportarLogsSuporte, diasLogsSuporte;
 import '../app/prestador_novo.dart' show tiposDocumento;
 import '../acesso/acesso.dart' show metaAnimacaoLogin;
-import '../app/sistema.dart' show abrirEndereco;
+import '../app/sistema.dart' show abrirEndereco, abrirCaminho;
 import '../editor/editor_rico.dart';
 import '../kit/arquivos.dart';
 import '../kit/campo.dart';
@@ -168,6 +169,8 @@ class ConfigState extends State<TelaConfig> {
   late _CartaoSincronizacao _sincronizacao;
   late _CartaoEmissao _emissao;
   late _CartaoAtualizacao _atualizacao;
+  late _CartaoLogs _logs;
+  late _CartaoTabelas _tabelas;
   late _CartaoApoio _apoio;
 
   @override
@@ -221,6 +224,8 @@ class ConfigState extends State<TelaConfig> {
     _personalizacao = _CartaoPersonalizacao(this);
     _geral = _CartaoGeral(this);
     _atualizacao = _CartaoAtualizacao(this);
+    _logs = _CartaoLogs(this);
+    _tabelas = _CartaoTabelas(this);
     _apoio = _CartaoApoio(this);
     _cartoes = [
       ?_email,
@@ -237,6 +242,8 @@ class ConfigState extends State<TelaConfig> {
       _personalizacao,
       _geral,
       _atualizacao,
+      _logs,
+      _tabelas,
       _apoio,
     ];
     _geracao++;
@@ -563,6 +570,7 @@ class ConfigState extends State<TelaConfig> {
           ('Cofre', Icons.lock_outlined),
           ('Atualizações', Icons.system_update_alt),
           ('Emissão', Icons.send_outlined),
+          ('Logs', Icons.article_outlined),
         ],
         paineis: [
           tem ? painel([_email!]) : const Ct(),
@@ -570,7 +578,8 @@ class ConfigState extends State<TelaConfig> {
           painel([_banco, _protecao, _senhaMestra]),
           painel([_sincronizacao]),
           painel([_atualizacao]),
-          painel([_emissao]),
+          painel([_emissao, _tabelas]),
+          painel([_logs]),
         ],
       ),
     );
@@ -2017,6 +2026,7 @@ class _CartaoEmail extends _Cartao {
           const Ct(largura: 18),
           Marcar(
             idLayout: 'Checkbox.config.2',
+            rente: false, // vem depois do seletor de ambiente
             valor: _auto,
             rotulo: 'Enviar automaticamente após emitir',
             desabilitado: t,
@@ -2475,10 +2485,11 @@ class _CartaoEmissao extends _Cartao {
           rotulo: 'Unidade',
           largura: 165,
           buscar: false,
+          idLayout: 'Config.emissao.listaUnidade',
         ),
       ], quebra: true),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d), idLayout: 'Config.emissao.botaoCancelar'),
         Botao(
           'Confirmar',
           desabilitado: (int.tryParse(quantidade.text) ?? 0) < 1,
@@ -2491,6 +2502,7 @@ class _CartaoEmissao extends _Cartao {
             }
             app.fecharEsta(d);
           },
+          idLayout: 'Config.emissao.botaoConfirmar',
         ),
       ],
     );
@@ -2519,6 +2531,7 @@ class _CartaoEmissao extends _Cartao {
         _ativo = v == true;
         redesenhar();
       },
+      idLayout: 'Config.emissao.marcarAvisoRepeticao',
     ),
     ListaSuspensa(
       estado: _periodo,
@@ -2535,6 +2548,7 @@ class _CartaoEmissao extends _Cartao {
         }
         redesenhar();
       },
+      idLayout: 'Config.emissao.listaIntervalo',
     ),
     lin(_edicao.botoes()),
   ]);
@@ -4125,6 +4139,14 @@ class _CartaoAtualizacao extends _Cartao {
   }
 
   Map<String, dynamic> _e = const {};
+  final _intervalo = Suspensa();
+
+  static String _rotuloIntervalo(int h) => switch (h) {
+    0 => 'Ao abrir o programa',
+    1 => 'A cada 1 hora',
+    24 => 'Uma vez por dia',
+    _ => 'A cada $h horas',
+  };
 
   void _ler() {
     try {
@@ -4132,6 +4154,36 @@ class _CartaoAtualizacao extends _Cartao {
     } catch (_) {
       _e = const {};
     }
+    final opcoes = [
+      for (final h in (_e['opcoes_intervalo'] as List? ?? const [0, 1, 6, 24]))
+        (h as num).toInt(),
+    ];
+    _intervalo.opcoes = [for (final h in opcoes) Opcao('$h', _rotuloIntervalo(h))];
+    _intervalo.por('${_e['intervalo_horas'] ?? 24}');
+    _intervalo.avisar();
+  }
+
+  @override
+  void descartar() {
+    _intervalo.dispose();
+    super.descartar();
+  }
+
+  void _mudarIntervalo(int horas) {
+    if (!app.temPermissao('config.atualizacao')) {
+      _intervalo.por('${_e['intervalo_horas'] ?? 24}');
+      _intervalo.avisar();
+      app.exigirPermissao('config.atualizacao', () => _mudarIntervalo(horas));
+      return;
+    }
+    try {
+      _e = jaMapa('atualizacao.configurar', {'intervalo_horas': horas});
+      app.toast('Procura automática: ${_rotuloIntervalo(horas).toLowerCase()}.');
+    } catch (e) {
+      app.toast('$e', erro: true);
+    }
+    _ler();
+    redesenhar();
   }
 
   void _automatica(bool v) {
@@ -4171,12 +4223,35 @@ class _CartaoAtualizacao extends _Cartao {
       ),
       Marcar(
         valor: _e['automatica'] != false,
-        rotulo:
-            'Procurar versão nova sozinho ao abrir o programa (uma vez por dia)',
+        rotulo: 'Procurar versão nova sozinho',
         rente: true,
         aoMudar: (v) => _automatica(v == true),
         idLayout: 'TamanhosConfiguracoes.marcarAtualizacaoAutomatica',
       ),
+      ListaSuspensa(
+        estado: _intervalo,
+        rotulo: 'Frequência da procura',
+        idLayout: 'Config.atualizacao.frequencia',
+        largura: 210,
+        desabilitado: _e['automatica'] == false,
+        buscar: false,
+        aoSelecionar: (v) {
+          if (v != null) _mudarIntervalo(int.parse(v));
+        },
+      ),
+      _nota(
+        'A procura acontece 5 segundos depois de entrar e, com o programa aberto, sempre que o '
+        'intervalo passa. "Ao abrir o programa" procura a cada entrada, e não com o programa '
+        'aberto. Uma consulta sem novidade não gasta o limite do GitHub (60 por hora por '
+        'endereço de internet).',
+      ),
+      if (_e['modo_antigo'] == true && app.usuario.nivel >= 4)
+        Tx(
+          'Para ativar a nova proteção dos dados, execute o instalador uma vez. Esta '
+          'instalação foi atualizada pelo botão e ainda abre os bancos no modo antigo, sem o '
+          'serviço "Baiacu NFSe - Dados". Baixe o instalador na página do GitHub.',
+          cor: corAviso,
+        ),
       if (_e['instalavel'] == false)
         _nota(
           'Esta cópia está em modo de desenvolvimento: ela avisa da versão nova, mas não se '
@@ -4209,6 +4284,266 @@ class _CartaoAtualizacao extends _Cartao {
       ], idLayout: 'Grupo.config.lin.atualizacao'),
     ]);
   }
+}
+
+// ------------------------------------------------------------------------------------------- //
+// Avançado › Emissão: tabelas tributárias do IBS/CBS (cClassTrib e Anexo VIII)
+// ------------------------------------------------------------------------------------------- //
+class _CartaoTabelas extends _Cartao {
+  _CartaoTabelas(super.pai) {
+    _ler();
+  }
+
+  Map<String, dynamic> _s = const {};
+  bool _ocupado = false;
+
+  /// Em segundo plano: abrir Configurações não espera a leitura dos arquivos das tabelas.
+  void _ler() {
+    chamar<Map>('catalogo.situacao_tabelas').then((v) {
+      _s = Map<String, dynamic>.from(v);
+      redesenhar();
+    }, onError: (Object _) {});
+  }
+
+  String _linha(String chave, String nome) {
+    final t = Map<String, dynamic>.from((_s[chave] as Map?) ?? const {});
+    if (t.isEmpty) return '$nome: indisponível.';
+    final origem = t['origem'] == 'baixada' ? 'atualizada pelo botão' : 'a que veio com o programa';
+    final data = '${t['consultado_em'] ?? ''}';
+    return '$nome: ${t['quantidade']} registros, $origem'
+        '${data.isEmpty ? '' : ' (consultada em ${dataHora(data)})'}.';
+  }
+
+  void _atualizar() {
+    if (!app.temPermissao('config.tabelas')) {
+      app.exigirPermissao('config.tabelas', _atualizar);
+      return;
+    }
+    _ocupado = true;
+    redesenhar();
+    final h = app.toastProgresso('Consultando os portais oficiais…');
+    app.emSegundoPlano(() async {
+      try {
+        final r = Map<String, dynamic>.from(
+          await chamar<Map>('catalogo.atualizar_tabelas', const {}, (v) {
+            final etapa = (v as Map?)?['etapa'];
+            if (etapa != null) app.toastAndamento(h, '$etapa');
+          }),
+        );
+        // Na instalação, quem baixou foi o serviço: a tela relê as tabelas no próprio processo.
+        ja<Object?>('catalogo.recarregar');
+        final partes = [
+          for (final t in (r['tabelas'] as List?) ?? const [])
+            (t as Map)['ok'] == true
+                ? '${t['tabela']}: ${t['quantidade']} registros'
+                : '${t['tabela']}: ${t['erro']}',
+        ];
+        final falhou = ((r['tabelas'] as List?) ?? const []).any(
+          (t) => (t as Map)['ok'] != true,
+        );
+        app.toastFim(h, partes.join(' · '), erro: falhou);
+      } catch (e) {
+        registrar('Falha ao atualizar as tabelas tributárias: $e', nivel: 'error');
+        app.toastFim(h, 'Não foi possível atualizar as tabelas: $e', erro: true);
+      }
+      _ocupado = false;
+      if (_vivo) _ler();
+      redesenhar();
+    });
+  }
+
+  @override
+  Widget construir(BuildContext context) => _moldura([
+    _tituloCartao('Tabelas tributárias (IBS/CBS)'),
+    _nota(
+      'O cadastro de serviços filtra o indicador da operação (cIndOp), o CST e a '
+      'classificação tributária (cClassTrib) conforme o NBS escolhido, e a prévia e o lote '
+      'avisam das combinações que podem ser recusadas (E0901, E0958). As tabelas vêm do '
+      'portal Conformidade Fácil (cClassTrib) e do Anexo VIII da documentação técnica da NFS-e '
+      '(correlação item × NBS × cIndOp × cClassTrib), que a própria Receita ainda trata como '
+      'preliminar.',
+    ),
+    _nota(_linha('classificacoes', 'Classificação tributária')),
+    _nota(_linha('correlacao', 'Correlação NBS (Anexo VIII)')),
+    lin([
+      Botao.contorno(
+        'Atualizar tabelas tributárias',
+        icone: Icons.sync,
+        desabilitado: _ocupado,
+        aoClicar: _atualizar,
+        largura: TamanhosConfiguracoes.botaoAtualizarTabelas.largura,
+        altura: TamanhosConfiguracoes.botaoAtualizarTabelas.altura,
+        idLayout: 'TamanhosConfiguracoes.botaoAtualizarTabelas',
+      ),
+    ], quebra: true, idLayout: 'Grupo.config.lin.tabelas'),
+  ]);
+}
+
+// ------------------------------------------------------------------------------------------- //
+// Avançado › Logs: espaço máximo, prazo e máscara; exportação para o suporte
+// ------------------------------------------------------------------------------------------- //
+class _CartaoLogs extends _Cartao {
+  _CartaoLogs(super.pai) {
+    _ler();
+    _edicao = _Edicao(
+      this,
+      permissao: 'config.logs',
+      titulo: 'Logs',
+      valores: [
+        _Valor(() => _maxMb, (v) => _maxMb = v as int),
+        _Valor(() => _dias, (v) => _dias = v as int),
+        _Valor(() => _mascarar, (v) => _mascarar = v as bool),
+      ],
+      salvar: () {
+        try {
+          _s = jaMapa('registro.configurar', {
+            'max_mb': _maxMb,
+            'dias': _dias,
+            'mascarar': _mascarar,
+          });
+          _opcoes();
+          app.toast('Configuração dos logs salva.');
+          return true;
+        } catch (e) {
+          app.toast('$e', erro: true);
+          return false;
+        }
+      },
+    );
+  }
+
+  final _tamanho = Suspensa();
+  final _prazo = Suspensa();
+  Map<String, dynamic> _s = const {};
+  int _maxMb = 100;
+  int _dias = 90;
+  bool _mascarar = true;
+  late final _Edicao _edicao;
+
+  static String _rotuloMb(int mb) => mb >= 1000 ? '${mb ~/ 1000} GB' : '$mb MB';
+  static String _rotuloDias(int d) => switch (d) {
+    90 => '3 meses',
+    180 => '6 meses',
+    365 => '1 ano',
+    730 => '2 anos',
+    _ => '$d dias',
+  };
+
+  /// Em segundo plano: contar os arquivos de log não segura a abertura de Configurações.
+  void _ler() {
+    _opcoes();
+    chamar<Map>('registro.situacao').then((v) {
+      _s = Map<String, dynamic>.from(v);
+      if (!_edicao.aberto) {
+        _maxMb = (_s['max_mb'] as num?)?.toInt() ?? 100;
+        _dias = (_s['dias'] as num?)?.toInt() ?? 90;
+        _mascarar = _s['mascarar'] != false;
+      }
+      _opcoes();
+      redesenhar();
+    }, onError: (Object _) {});
+  }
+
+  void _opcoes() {
+    final mbs = [for (final v in (_s['opcoes_mb'] as List? ?? const [100])) (v as num).toInt()];
+    final dias = [for (final v in (_s['opcoes_dias'] as List? ?? const [90])) (v as num).toInt()];
+    _tamanho.opcoes = [for (final m in mbs) Opcao('$m', _rotuloMb(m))];
+    _tamanho.por('$_maxMb');
+    _tamanho.avisar();
+    _prazo.opcoes = [for (final d in dias) Opcao('$d', _rotuloDias(d))];
+    _prazo.por('$_dias');
+    _prazo.avisar();
+  }
+
+  @override
+  void descartar() {
+    _tamanho.dispose();
+    _prazo.dispose();
+    super.descartar();
+  }
+
+  String _ocupacao() {
+    if (_s.isEmpty) return 'Conferindo o espaço ocupado pelos logs…';
+    final total = (_s['total_bytes'] as num?) ?? 0;
+    final n = (_s['arquivos'] as num?)?.toInt() ?? 0;
+    final antigo = '${_s['mais_antigo'] ?? ''}';
+    if (n == 0) return 'Ainda não há logs gravados.';
+    return 'Hoje os logs ocupam ${tamanhoArquivo(total)} em $n arquivo${n == 1 ? '' : 's'}'
+        '${antigo.isEmpty ? '' : ', o mais antigo de ${dataHora(antigo)}'}.';
+  }
+
+  @override
+  Widget construir(BuildContext context) => _moldura([
+    _tituloCartao('Logs'),
+    _nota(
+      'Os logs registram o que o programa fez (emissões, consultas, envios, erros) e são o '
+      'que o suporte usa para descobrir a causa de um problema. Um arquivo por dia; quando o '
+      'total passa do limite ou do prazo, os mais antigos são apagados sozinhos.',
+    ),
+    _nota(_ocupacao()),
+    lin([
+      ListaSuspensa(
+        estado: _tamanho,
+        rotulo: 'Espaço máximo',
+        largura: 170,
+        desabilitado: _edicao.travado,
+        buscar: false,
+        idLayout: 'Config.logs.espacoMaximo',
+        aoSelecionar: (v) {
+          if (v != null) _maxMb = int.parse(v);
+          redesenhar();
+        },
+      ),
+      ListaSuspensa(
+        estado: _prazo,
+        rotulo: 'Guardar por',
+        largura: 170,
+        desabilitado: _edicao.travado,
+        buscar: false,
+        idLayout: 'Config.logs.prazo',
+        aoSelecionar: (v) {
+          if (v != null) _dias = int.parse(v);
+          redesenhar();
+        },
+      ),
+    ], quebra: true, idLayout: 'Grupo.config.lin.logs'),
+    Marcar(
+      rente: true,
+      valor: _mascarar,
+      rotulo: 'Mascarar CPF, CNPJ e e-mail nos logs (recomendado)',
+      desabilitado: _edicao.travado,
+      aoMudar: (v) {
+        _mascarar = v == true;
+        redesenhar();
+      },
+      idLayout: 'Config.logs.mascarar',
+    ),
+    _nota(
+      'Senhas, certificados e XMLs completos nunca vão para os logs. Ao exportar para o '
+      'suporte, CPF, CNPJ e e-mail saem sempre mascarados, mesmo com a opção acima desligada. '
+      'O pacote leva os logs dos últimos $diasLogsSuporte dias e o registro do atualizador.',
+    ),
+    lin([
+      ..._edicao.botoes(),
+      Botao.contorno(
+        'Exportar logs para o suporte',
+        icone: Icons.folder_zip_outlined,
+        aoClicar: () => exportarLogsSuporte(app),
+        largura: TamanhosConfiguracoes.botaoExportarLogs.largura,
+        altura: TamanhosConfiguracoes.botaoExportarLogs.altura,
+        idLayout: 'TamanhosConfiguracoes.botaoExportarLogs',
+      ),
+      Botao.contorno(
+        'Abrir a pasta',
+        icone: Icons.folder_open_outlined,
+        desabilitado: '${_s['pasta'] ?? ''}'.isEmpty,
+        aoClicar: () => abrirCaminho(app, '${_s['pasta']}'),
+        largura: TamanhosConfiguracoes.botaoAbrirPastaLogs.largura,
+        altura: TamanhosConfiguracoes.botaoAbrirPastaLogs.altura,
+        idLayout: 'TamanhosConfiguracoes.botaoAbrirPastaLogs',
+      ),
+    ], quebra: true, idLayout: 'Grupo.config.lin.logsBotoes'),
+  ]);
 }
 
 /// Configurações › Apoie este projeto: o convite e o botão que abre a janela de doação.

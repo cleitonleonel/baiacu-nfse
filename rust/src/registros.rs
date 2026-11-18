@@ -71,6 +71,17 @@ fn linhas(texto: &str) -> Vec<&str> {
     out
 }
 
+/// "nfse_20261117.log" → (17/11/2026, 0); "nfse_20261117.log.3" → (17/11/2026, 3).
+fn data_e_giro(nome: &str) -> Option<(NaiveDate, u32)> {
+    let resto = nome.strip_prefix("nfse_")?;
+    let (data, giro) = resto.split_once(".log")?;
+    let giro = match giro {
+        "" => 0,
+        g => g.strip_prefix('.')?.parse().ok()?,
+    };
+    Some((NaiveDate::parse_from_str(data, "%Y%m%d").ok()?, giro))
+}
+
 /// Registros do período. `dias` é limitado a 31 para não varrer o diretório inteiro.
 pub fn consultar_registros(dias: i64, termo: &str, so_erros: bool, limite: i64) -> Vec<Value> {
     let dias = (if dias == 0 { 30 } else { dias }).clamp(1, 31);
@@ -81,30 +92,28 @@ pub fn consultar_registros(dias: i64, termo: &str, so_erros: bool, limite: i64) 
         sort_nome(aparar(termo))
     };
     let corte = chrono::Local::now().naive_local() - Duration::days(dias);
-    let pasta = crate::caminhos::raiz().join("logs");
+    let pasta = crate::registro::pasta_logs();
     let Ok(itens) = std::fs::read_dir(&pasta) else {
         return Vec::new();
     };
 
-    // Só os arquivos do período (o nome carrega a data) e do mais novo para o mais velho.
-    let mut arquivos: Vec<(NaiveDate, std::path::PathBuf)> = Vec::new();
+    // Só os arquivos do período (o nome carrega a data), do mais novo para o mais velho. No mesmo
+    // dia, o .log é o mais novo, depois .log.1, .log.2… (os girados também contam).
+    let mut arquivos: Vec<(NaiveDate, u32, std::path::PathBuf)> = Vec::new();
     for e in itens.flatten() {
         let nome = e.file_name().to_string_lossy().into_owned();
-        let Some(radical) = nome.strip_suffix(".log").filter(|r| r.starts_with("nfse_")) else {
-            continue;
-        };
-        let Ok(d) = NaiveDate::parse_from_str(&radical.replace("nfse_", ""), "%Y%m%d") else {
+        let Some((d, giro)) = data_e_giro(&nome) else {
             continue;
         };
         if d >= corte.date() {
-            arquivos.push((d, e.path()));
+            arquivos.push((d, giro, e.path()));
         }
     }
-    arquivos.sort_by(|a, b| b.cmp(a));
+    arquivos.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
 
     let mut out: Vec<Value> = Vec::new();
     let mut ultimo: Option<(NaiveDateTime, String)> = None;
-    for (_, arquivo) in arquivos {
+    for (_, _, arquivo) in arquivos {
         let Ok(bytes) = std::fs::read(&arquivo) else {
             continue;
         };

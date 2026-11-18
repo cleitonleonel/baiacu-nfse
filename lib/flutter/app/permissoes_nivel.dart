@@ -207,6 +207,7 @@ void abrirPermissoesNivel(App app) {
             alterado = true;
             d.atualizar();
           },
+          idLayout: 'Permissoes.listaNivelMinimoDeRegra',
         ),
       ],
     );
@@ -404,17 +405,21 @@ void abrirPermissoesNivel(App app) {
                 aoClicar: controle.open,
                 desabilitado: ocupado,
                 icone: Icons.swap_vert,
+                idLayout: 'Permissoes.botaoExportarImportarPermissoes',
               ),
             ),
             const Spacer(),
-            TextButton(
-              onPressed: ocupado ? null : () => app.fecharEsta(d),
-              child: const Text('Cancelar'),
+            Botao.texto(
+              'Cancelar',
+              desabilitado: ocupado,
+              aoClicar: () => app.fecharEsta(d),
+              idLayout: 'Permissoes.botaoCancelar',
             ),
-            FilledButton(
-              onPressed: ocupado || !alterado
-                  ? null
-                  : () {
+            Botao(
+              'Salvar',
+              desabilitado: ocupado || !alterado,
+              idLayout: 'Permissoes.botaoSalvar',
+              aoClicar: () {
                       try {
                         Permissoes.aplicar(
                           jaMapa('permissoes.salvar', {'perfil': perfil()}),
@@ -429,7 +434,6 @@ void abrirPermissoesNivel(App app) {
                         );
                       }
                     },
-              child: const Text('Salvar'),
             ),
           ],
         ),

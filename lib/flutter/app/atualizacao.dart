@@ -12,14 +12,16 @@ final atualizacaoDisponivel = ValueNotifier<Map<String, dynamic>?>(null);
 final _avisoExibido = Expando<String>();
 
 const _verde = Color(0xFF15803D);
-const _cursorAtualizacao = WidgetStatePropertyAll<MouseCursor>(
-  SystemMouseCursors.click,
-);
+
 
 /// Procura versão nova. [automatica]: a procura sozinha ao entrar (respeita o intervalo, a
 /// opção desligada e a versão pulada, e nunca mostra erro). Manual: sempre consulta e diz o
 /// resultado.
-Future<void> procurarAtualizacao(App app, {bool automatica = false}) async {
+Future<void> procurarAtualizacao(
+  App app, {
+  bool automatica = false,
+  bool aoEntrar = false,
+}) async {
   if (automatica) {
     if (!app.temPermissao('config.atualizacao.preparar', somenteLogado: true))
       return;
@@ -29,7 +31,10 @@ Future<void> procurarAtualizacao(App app, {bool automatica = false}) async {
   final h = automatica ? null : app.toastProgresso('Procurando versão nova…');
   try {
     final r = Map<String, dynamic>.from(
-      await chamar<Map>('atualizacao.verificar', {'automatica': automatica}),
+      await chamar<Map>('atualizacao.verificar', {
+        'automatica': automatica,
+        'ao_entrar': aoEntrar,
+      }),
     );
     if (!app.viva) return;
     if (r['disponivel'] == true) {
@@ -48,6 +53,25 @@ Future<void> procurarAtualizacao(App app, {bool automatica = false}) async {
   } catch (e) {
     if (h != null) app.toastFim(h, '$e', erro: true);
   }
+}
+
+/// Instalação atualizada pelo botão desde a 1.0.0.2: sem o serviço de dados, os bancos abrem no
+/// modo antigo. Só o nível 4 é avisado (é quem pode rodar o instalador), uma vez por sessão.
+void avisarModoAntigo(App app) {
+  if (!app.viva || app.usuario.nivel < 4) return;
+  try {
+    if (jaMapa('atualizacao.estado')['modo_antigo'] != true) return;
+  } catch (_) {
+    return;
+  }
+  app.toast(
+    'Para ativar a nova proteção dos dados, execute o instalador uma vez '
+    '(Configurações › Avançado › Atualizações).',
+  );
+  registrar(
+    'Instalação sem o serviço de dados (atualizada pelo botão): aviso mostrado ao nível 4.',
+    nivel: 'warning',
+  );
 }
 
 void mostrarAtualizacaoDisponivel(
@@ -196,9 +220,9 @@ void abrirAtualizacao(App app) {
       );
     },
     acoes: (context) => [
-      TextButton(
-        style: const ButtonStyle(mouseCursor: _cursorAtualizacao),
-        onPressed: () {
+      Botao.texto(
+        'Pular esta versão',
+        aoClicar: () {
           try {
             ja<Object?>('atualizacao.configurar', {'pular': versao});
           } catch (_) {}
@@ -209,43 +233,41 @@ void abrirAtualizacao(App app) {
             'Configurações › Avançado › Atualizações.',
           );
         },
-        child: const Text('Pular esta versão'),
+        idLayout: 'Atualizacao.botaoPular',
       ),
       Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          OutlinedButton(
-            style: const ButtonStyle(mouseCursor: _cursorAtualizacao),
-            onPressed: () => app.fecharEsta(d),
-            child: const Text('Depois'),
+          Botao.contorno(
+            'Depois',
+            aoClicar: () => app.fecharEsta(d),
+            idLayout: 'Atualizacao.botaoDepois',
           ),
           const SizedBox(width: 8),
           if (instalavel)
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                enabledMouseCursor: SystemMouseCursors.click,
-                backgroundColor: _verde,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () {
+            Botao(
+              'Atualizar agora',
+              icone: Icons.download,
+              fundo: _verde,
+              cor: Colors.white,
+              aoClicar: () {
                 app.fecharEsta(d);
                 _baixarEInstalar(app, versao);
               },
-              icon: const Icon(Icons.download, size: 16),
-              label: const Text('Atualizar agora'),
+              idLayout: 'Atualizacao.botaoAtualizarAgora',
             )
           else
-            FilledButton.icon(
-              style: const ButtonStyle(mouseCursor: _cursorAtualizacao),
-              onPressed: () {
+            Botao(
+              'Abrir página de download',
+              icone: Icons.open_in_new,
+              aoClicar: () {
                 try {
                   abrirEndereco('${info['pagina'] ?? ''}');
                 } catch (e) {
                   app.toast('$e', erro: true);
                 }
               },
-              icon: const Icon(Icons.open_in_new, size: 16),
-              label: const Text('Abrir página de download'),
+              idLayout: 'Atualizacao.botaoPaginaDownload',
             ),
         ],
       ),
@@ -348,18 +370,18 @@ void _confirmar(App app, String versao) {
       style: TextStyle(fontSize: Letra.texto),
     ),
     acoes: (_) => [
-      OutlinedButton(
-        style: const ButtonStyle(mouseCursor: _cursorAtualizacao),
-        onPressed: () => app.fecharEsta(d),
-        child: const Text('Instalar depois'),
+      Botao.contorno(
+        'Instalar depois',
+        aoClicar: () => app.fecharEsta(d),
+        idLayout: 'Atualizacao.botaoInstalarDepois',
       ),
-      FilledButton.icon(
-        style: FilledButton.styleFrom(
-          enabledMouseCursor: SystemMouseCursors.click,
-          backgroundColor: _verde,
-          foregroundColor: Colors.white,
-        ),
-        onPressed: () async {
+      Botao(
+        'Instalar e reiniciar',
+        icone: Icons.restart_alt,
+        fundo: _verde,
+        cor: Colors.white,
+        idLayout: 'Atualizacao.botaoInstalarReiniciar',
+        aoClicar: () async {
           if (app.ocupado) {
             app.toast(
               'Conclua a operação em andamento antes de instalar a atualização.',
@@ -387,8 +409,6 @@ void _confirmar(App app, String versao) {
           );
           await app.fechar();
         },
-        icon: const Icon(Icons.restart_alt, size: 16),
-        label: const Text('Instalar e reiniciar'),
       ),
     ],
     alinhamentoAcoes: MainAxisAlignment.end,

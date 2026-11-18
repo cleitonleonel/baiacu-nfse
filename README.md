@@ -51,6 +51,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 - **Escolha o cliente e o serviço.** Descrição, valor e tributos já vêm do cadastro; você só ajusta o que mudou.
 - **Veja a nota antes de mandar.** Uma prévia mostra tudo em cartões fáceis de ler: quem presta, quem recebe, o serviço, os valores e os impostos.
 - **O programa confere por você.** Antes de transmitir, ele verifica a nota e avisa o que precisa ser corrigido.
+- **Códigos do IBS/CBS que combinam.** No cadastro do serviço, o indicador da operação (cIndOp), o CST e a classificação tributária (cClassTrib) aparecem filtrados pelo NBS escolhido, conforme a tabela oficial de correlação (Anexo VIII da NFS-e); a tributação integral (CST 000) aparece sempre. A prévia e o lote avisam das combinações que costumam ser recusadas, e as tabelas podem ser atualizadas com um clique.
 - **Caiu a internet?** A nota fica guardada numa fila e você envia depois, sem perder nada e sem refazer.
 - **Errou?** Cancele ou substitua a nota pelo próprio programa.
 
@@ -66,6 +67,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 - Cadastre cada cliente **uma única vez**, junto com os serviços que você presta para ele.
 - **Busque o CNPJ e o CEP** pela internet para não digitar endereço na mão.
 - Separe os clientes em **grupos** para achar todo mundo rápido.
+- **Importe e exporte clientes por planilha** (Excel, OpenDocument ou CSV). Baixe o modelo, preencha e veja uma prévia com os erros de cada linha antes de gravar. O CPF/CNPJ evita duplicados, e o município pode vir pelo código IBGE ou pela cidade e UF.
 - Já aceita o **novo CNPJ com letras e números**.
 
 ### 🏢 Uma empresa ou várias
@@ -95,8 +97,8 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 ### 🎨 Do seu jeito
 - **Personalize as cores** do programa.
 - **Leitor de PDF incluído**, para abrir as notas sem instalar mais nada.
-- Um **histórico** registra tudo o que aconteceu, para você saber o que foi enviado e quando.
-- **Sempre atualizado:** quando sai uma versão nova, o programa avisa e se atualiza com um clique, sem mexer nos seus dados.
+- Um **histórico** registra tudo o que aconteceu, para você saber o que foi enviado e quando. Você define quanto espaço os logs podem ocupar e por quanto tempo ficam guardados, e pode **exportá-los para o suporte** com CPF, CNPJ e e-mail mascarados.
+- **Sempre atualizado:** quando sai uma versão nova, o programa avisa e se atualiza com um clique, sem mexer nos seus dados. Você escolhe quando ele procura: ao abrir o programa, a cada hora, a cada 6 horas ou uma vez por dia.
 
 ---
 
@@ -113,7 +115,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 
 ## 🏁 Como começar
 
-1. **Baixe** o instalador `Baiacu-NFS-e-…-setup.exe` em [Releases](https://github.com/williamlala/baiacu-nfse/releases/latest) e abra.
+1. **Baixe** o instalador `Baiacu-NFS-e-…-setup.exe` em [Releases](https://github.com/williamlala/baiacu-nfse/releases/latest) e abra. Se aparecer a tela azul **"O Windows protegeu o computador"**, clique em **Mais informações** e depois em **Executar assim mesmo** (veja a pergunta frequente abaixo).
 2. Avance as telas do instalador. Ele pede permissão de administrador **só nessa hora** e já deixa o programa pronto para **todos os usuários** do computador.
 3. Crie a sua **senha mestra** e o seu usuário.
 4. Cadastre a sua **empresa** e importe o **certificado digital**.
@@ -163,15 +165,21 @@ Sim. O Cofre de notas busca no Ambiente Nacional as notas emitidas para o seu CN
 </details>
 
 <details>
+<summary><b>O Windows disse "O Windows protegeu o computador". É seguro?</b></summary>
+<br>
+Esse aviso (SmartScreen) aparece para programas novos que ainda não têm um certificado de assinatura de código, que é pago. Não quer dizer que o arquivo tenha vírus. Confira se o instalador veio da página oficial de <a href="https://github.com/williamlala/baiacu-nfse/releases/latest">Releases</a>, clique em <b>Mais informações</b> e depois em <b>Executar assim mesmo</b>. Cada versão é enviada para análise da Microsoft, e o aviso tende a sumir conforme o programa ganha reputação.
+</details>
+
+<details>
 <summary><b>Como recebo as versões novas?</b></summary>
 <br>
-O programa procura versão nova sozinho, uma vez por dia. Quando houver, aparece um botão verde no topo. O pacote é autenticado por assinatura Ed25519 e instalado por um serviço sob demanda. O programa só reabre após a conclusão; se a instalação for interrompida, detecta a atualização pendente e oferece recuperar a versão anterior antes de carregar o núcleo. A recuperação de uma instalação compartilhada pode solicitar administrador.
+O programa procura versão nova sozinho, na frequência que você escolher em Configurações › Avançado › Atualizações: ao abrir o programa (a cada entrada), a cada hora, a cada 6 horas ou uma vez por dia (o padrão). A procura acontece 5 segundos depois de entrar. Quando houver, aparece um botão verde no topo. O pacote é autenticado por assinatura Ed25519 e instalado por um serviço sob demanda. O programa só reabre após a conclusão; se a instalação for interrompida, detecta a atualização pendente e oferece recuperar a versão anterior antes de carregar o núcleo. A recuperação de uma instalação compartilhada pode solicitar administrador. Quem só atualizou pelo botão desde a 1.0.0.2 deve executar o instalador mais recente uma vez, para ativar o serviço de dados; o programa avisa o usuário nível 4.
 </details>
 
 <details>
 <summary><b>Várias pessoas usam o mesmo computador. Funciona?</b></summary>
 <br>
-Funciona. O programa fica protegido em Program Files, com bancos compartilhados em ProgramData. Desde a versão 1.0.0.3, o serviço **Baiacu NFSe - Dados** abre os bancos sob uma conta virtual própria. Para migrar uma instalação existente pela primeira vez, use o instalador 1.0.0.3. A edição portátil guarda os bancos junto do programa. O uso normal e as atualizações pelo serviço não pedem administrador; instalar, reparar um serviço ausente/desativado ou recuperar uma atualização interrompida pode exigir elevação. Cada pessoa entra com o próprio login no programa, com o nível de acesso dela. Para proteger os dados, ele só fica aberto por uma pessoa de cada vez naquele computador.
+Funciona. O programa fica protegido em Program Files, com bancos compartilhados em ProgramData. Desde a versão 1.0.0.3, o serviço **Baiacu NFSe - Dados** abre os bancos sob uma conta virtual própria. Para migrar uma instalação existente pela primeira vez, use o instalador mais recente. A edição portátil guarda os bancos junto do programa. O uso normal e as atualizações pelo serviço não pedem administrador; instalar, reparar um serviço ausente/desativado ou recuperar uma atualização interrompida pode exigir elevação. Cada pessoa entra com o próprio login no programa, com o nível de acesso dela. Para proteger os dados, ele só fica aberto por uma pessoa de cada vez naquele computador.
 </details>
 
 <details>

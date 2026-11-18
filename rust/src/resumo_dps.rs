@@ -280,8 +280,8 @@ fn formatar(tag: &str, pai: &str, v: &str) -> String {
         "cTribNac" => de_opcoes(catalogo::tribnac_options(), v),
         "cNBS" => de_opcoes(catalogo::nbs_options(), v),
         "cIndOp" => de_opcoes(catalogo::indop_options(), v),
-        "CST" if pai != "piscofins" => de_opcoes(catalogo::cst_options(), v),
-        "CSTReg" => de_opcoes(catalogo::cst_options(), v),
+        "CST" if pai != "piscofins" => de_opcoes(&catalogo::cst_options(), v),
+        "CSTReg" => de_opcoes(&catalogo::cst_options(), v),
         "cClassTrib" | "cClassTribReg" => {
             let r = catalogo::classtrib_rotulo(v);
             if r.is_empty() { v.to_string() } else { r }

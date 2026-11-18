@@ -784,6 +784,7 @@ class Botao extends StatelessWidget {
     this.cursorTravado = false,
     this.foco,
     this.focoInicial = false,
+    this.compacto = false,
   });
 
   const Botao.contorno(
@@ -803,6 +804,7 @@ class Botao extends StatelessWidget {
     this.cursorTravado = false,
     this.foco,
     this.focoInicial = false,
+    this.compacto = false,
   }) : tipo = TipoBotao.contorno;
 
   const Botao.texto(
@@ -822,6 +824,7 @@ class Botao extends StatelessWidget {
     this.cursorTravado = false,
     this.foco,
     this.focoInicial = false,
+    this.compacto = false,
   }) : tipo = TipoBotao.texto;
 
   final String? rotulo;
@@ -845,6 +848,9 @@ class Botao extends StatelessWidget {
   final bool cursorTravado;
   final FocusNode? foco;
   final bool focoInicial;
+
+  /// Sem folga nem tamanho mínimo (botão de texto dentro de uma célula de tabela).
+  final bool compacto;
 
   final String? idLayout;
 
@@ -878,6 +884,14 @@ class Botao extends StatelessWidget {
             ),
           )
         : base;
+    // Compacto: sem folga nem tamanho mínimo, para caber numa célula de tabela.
+    final estilo = compacto
+        ? st.copyWith(
+            padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 4)),
+            minimumSize: const WidgetStatePropertyAll(Size.zero),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          )
+        : st;
     final textoOriginal =
         rotulo ??
         (filho is Text
@@ -903,7 +917,7 @@ class Botao extends StatelessWidget {
       case TipoBotao.cheio:
         b = ic != null
             ? FilledButton.icon(
-                style: st,
+                style: estilo,
                 autofocus: focoInicial,
                 focusNode: foco,
                 onPressed: aperta,
@@ -914,7 +928,7 @@ class Botao extends StatelessWidget {
                 label: conteudo ?? const SizedBox.shrink(),
               )
             : FilledButton(
-                style: st,
+                style: estilo,
                 autofocus: focoInicial,
                 focusNode: foco,
                 onPressed: aperta,
@@ -931,7 +945,7 @@ class Botao extends StatelessWidget {
                 onPressed: aperta,
                 onLongPress: longo,
                 clipBehavior: Clip.none,
-                style: st,
+                style: estilo,
                 icon: ic,
                 label: conteudo ?? const SizedBox.shrink(),
               )
@@ -942,7 +956,7 @@ class Botao extends StatelessWidget {
                 onLongPress: longo,
                 clipBehavior: Clip.none,
                 onHover: paira,
-                style: st,
+                style: estilo,
                 child: conteudo,
               );
       case TipoBotao.texto:
@@ -953,7 +967,7 @@ class Botao extends StatelessWidget {
                 onPressed: aperta,
                 onLongPress: longo,
                 onHover: paira,
-                style: st,
+                style: estilo,
                 clipBehavior: Clip.none,
                 icon: ic,
                 label: conteudo ?? const SizedBox.shrink(),
@@ -961,7 +975,7 @@ class Botao extends StatelessWidget {
             : TextButton(
                 autofocus: focoInicial,
                 focusNode: foco,
-                style: st,
+                style: estilo,
                 onPressed: aperta,
                 onLongPress: longo,
                 onHover: paira,
@@ -1078,7 +1092,7 @@ class Marcar extends StatelessWidget {
     this.estiloRotulo,
     this.sobreposicao,
     this.raioRespingo,
-    this.rente = false,
+    this.rente = true,
   });
   final bool? valor;
   final String? idLayout;
@@ -1095,8 +1109,10 @@ class Marcar extends StatelessWidget {
   final Color? sobreposicao;
   final double? raioRespingo;
 
-  /// Encosta a caixa na margem esquerda: desconta a folga que o Checkbox deixa em volta do
-  /// quadradinho, para alinhar com os títulos e campos de cima.
+  /// Encosta a caixa na margem esquerda (padrão): desconta, no layout, a folga que o Checkbox
+  /// deixa em volta do quadradinho, para alinhar com os títulos e campos de cima. Desligue só
+  /// quando a caixa não começa a linha (no meio de uma linha, dentro de célula/ListTile) ou
+  /// quando outro recuo já cuida do alinhamento.
   final bool rente;
 
   /// Folga, de cada lado, entre a área de toque do Checkbox e o quadradinho desenhado.
@@ -1131,22 +1147,31 @@ class Marcar extends StatelessWidget {
         idLayout ??
         context.dependOnInheritedWidgetOfExactType<ItemLayoutScope>()?.chave;
     final ajuste = ajusteLayout(context, id);
-    final ativo = !desabilitado && !travado(context);
-    final caixa = Checkbox(
-      mouseCursor: ativo ? SystemMouseCursors.click : SystemMouseCursors.basic,
-      side: const WidgetStateBorderSide.fromMap({
-        WidgetState.any: BorderSide(color: PadraoControles.borda),
-      }),
-      shape: FormaControle(densidade: MediaQuery.devicePixelRatioOf(context)),
-      autofocus: false,
-      value: tresEstados ? valor : (valor ?? false),
-      isError: false,
-      splashRadius: raioRespingo,
-      overlayColor: sobreposicao == null
-          ? null
-          : WidgetStatePropertyAll(sobreposicao),
-      tristate: tresEstados,
-      onChanged: ativo ? (v) => aoMudar?.call(v) : null,
+    final ativo = aoMudar != null && !desabilitado && !travado(context);
+    final caixa = _Aura(
+      ativo: ativo,
+      marcado: valor != false && (valor != null || tresEstados),
+      cor: sobreposicao,
+      raio: raioRespingo,
+      child: Checkbox(
+        mouseCursor: ativo ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        side: const WidgetStateBorderSide.fromMap({
+          WidgetState.any: BorderSide(color: PadraoControles.borda),
+        }),
+        shape: FormaControle(densidade: MediaQuery.devicePixelRatioOf(context)),
+        autofocus: false,
+        value: tresEstados ? valor : (valor ?? false),
+        isError: false,
+        splashRadius: raioRespingo,
+        // O halo do mouse fica na _Aura. Mantém o indicador de foco do teclado.
+        overlayColor: WidgetStateProperty.resolveWith(
+          (estados) => estados.contains(WidgetState.focused)
+              ? sobreposicao
+              : Colors.transparent,
+        ),
+        tristate: tresEstados,
+        onChanged: ativo ? (v) => aoMudar?.call(v) : null,
+      ),
     );
     Widget w = caixa;
     if (rotulo != null || filhoRotulo != null) {
@@ -1171,7 +1196,7 @@ class Marcar extends StatelessWidget {
       );
     }
     if (rente) {
-      w = Transform.translate(offset: Offset(-folga(context), 0), child: w);
+      w = PuxarEsquerda(recuo: folga(context), child: w);
     }
     return alvoLayout(
       context,
@@ -1191,6 +1216,110 @@ class Marcar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Realce redondo do hover/clique de uma caixa de marcar, desenhado na camada de cima da janela
+/// (OverlayPortal) e preso à caixa: nunca é cortado pela borda de um cartão ou de uma rolagem,
+/// mesmo com a caixa encostada na margem, e não exige alargar nada.
+class _Aura extends StatefulWidget {
+  const _Aura({
+    required this.ativo,
+    required this.marcado,
+    required this.child,
+    this.cor,
+    this.raio,
+  });
+  final bool ativo;
+  final bool marcado;
+  final Color? cor;
+  final double? raio;
+  final Widget child;
+
+  @override
+  State<_Aura> createState() => _AuraState();
+}
+
+class _AuraState extends State<_Aura> {
+  final _link = LayerLink();
+  final _portal = OverlayPortalController();
+  bool _sobre = false;
+  bool _apertado = false;
+
+  void _atualizar() {
+    if (!mounted) return;
+    final mostrar = widget.ativo && (_sobre || _apertado);
+    if (mostrar && !_portal.isShowing) {
+      _portal.show();
+    } else if (!mostrar && _portal.isShowing) {
+      _portal.hide();
+    }
+    setState(() {});
+  }
+
+  @override
+  void didUpdateWidget(_Aura antigo) {
+    super.didUpdateWidget(antigo);
+    if (!widget.ativo && _portal.isShowing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !widget.ativo && _portal.isShowing) _portal.hide();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    onEnter: (_) {
+      _sobre = true;
+      _atualizar();
+    },
+    onExit: (_) {
+      _sobre = false;
+      _apertado = false;
+      _atualizar();
+    },
+    child: Listener(
+      onPointerDown: (_) {
+        _apertado = true;
+        _atualizar();
+      },
+      onPointerUp: (_) {
+        _apertado = false;
+        _atualizar();
+      },
+      onPointerCancel: (_) {
+        _apertado = false;
+        _atualizar();
+      },
+      child: OverlayPortal(
+        controller: _portal,
+        overlayChildBuilder: (context) {
+          final esquema = Theme.of(context).colorScheme;
+          final raio = widget.raio ?? kRadialReactionRadius;
+          final base = widget.marcado ? esquema.primary : esquema.onSurface;
+          final cor =
+              widget.cor ?? base.withValues(alpha: _apertado ? 0.12 : 0.08);
+          return Positioned(
+            left: 0,
+            top: 0,
+            child: CompositedTransformFollower(
+              link: _link,
+              showWhenUnlinked: false,
+              targetAnchor: Alignment.center,
+              followerAnchor: Alignment.center,
+              child: IgnorePointer(
+                child: Container(
+                  width: raio * 2,
+                  height: raio * 2,
+                  decoration: BoxDecoration(color: cor, shape: BoxShape.circle),
+                ),
+              ),
+            ),
+          );
+        },
+        child: CompositedTransformTarget(link: _link, child: widget.child),
+      ),
+    ),
+  );
 }
 
 // --------------------------------------------------------------------------- //
@@ -1444,6 +1573,7 @@ class ListaSuspensa extends StatefulWidget {
     this.estiloRotulo,
     this.denso = false,
     this.substituirAoFocar = false,
+    this.preservarSelecaoAoBuscar = false,
     this.aoSelecionar,
     this.aoTexto,
     this.aoFocar,
@@ -1474,6 +1604,8 @@ class ListaSuspensa extends StatefulWidget {
   /// Ao ganhar o foco o campo esvazia (para digitar a busca); saindo sem escolher, volta o
   /// valor anterior.
   final bool substituirAoFocar;
+  /// Mantém o código confirmado enquanto o texto está sendo usado para buscar.
+  final bool preservarSelecaoAoBuscar;
   final ValueChanged<String?>? aoSelecionar;
   final ValueChanged<String>? aoTexto;
   final VoidCallback? aoFocar;
@@ -1560,7 +1692,7 @@ class _ListaSuspensaState extends State<ListaSuspensa> {
           e.temAnterior = true;
         }
         if (e.valor != null) {
-          e.porValorCru(null);
+          if (!widget.preservarSelecaoAoBuscar) e.porValorCru(null);
           e.texto = '';
           e.avisar();
         }
@@ -1573,7 +1705,9 @@ class _ListaSuspensaState extends State<ListaSuspensa> {
         // Uma escolha no menu pode chegar depois da perda do foco; um foco novo cancela.
         Timer(const Duration(milliseconds: 350), () {
           if (!mounted || e.ciclo != ciclo) return;
-          var escolhido = e.valor ?? anterior;
+          var escolhido = widget.preservarSelecaoAoBuscar
+              ? e.valor
+              : e.valor ?? anterior;
           final rotulo = e.textoDe(escolhido);
           if (escolhido != null && rotulo.isEmpty) escolhido = null;
           if (e.valor != escolhido || (e.texto ?? '') != rotulo) {

@@ -335,7 +335,7 @@ void abrirCliente(
       conteudo: (_) =>
           Tx('Remover ${contato.rotulo}: ${contato.valor.text.trim()}?'),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(confirmacao)),
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(confirmacao), idLayout: 'ClienteForm.botaoCancelar'),
         Botao(
           'Remover',
           icone: Icons.delete_outline,
@@ -343,6 +343,7 @@ void abrirCliente(
             app.fecharEsta(confirmacao);
             remover();
           },
+          idLayout: 'ClienteForm.botaoRemover',
         ),
       ],
       idLayout: 'Cliente.contato.confirmarExclusao',
@@ -407,8 +408,8 @@ void abrirCliente(
         ),
       ], justa: true),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(editor)),
-        Botao('Salvar', icone: Icons.save, aoClicar: salvarTipo),
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(editor), idLayout: 'ClienteForm.botaoCancelar2'),
+        Botao('Salvar', icone: Icons.save, aoClicar: salvarTipo, idLayout: 'ClienteForm.botaoSalvar'),
       ],
       idLayout: 'Cliente.contato.personalizar',
     );
@@ -577,12 +578,88 @@ void abrirCliente(
     d.atualizar();
   }
 
-  void classes(String cst, [String escolhida = '']) {
-    final ops = jaPares('catalogo.class_options', {'cst': cst});
-    ddRtcClasse.opcoes = opcoesDe(ops);
-    ddRtcClasse.por(ops.any((o) => o.$1 == escolhida) ? escolhida : null);
-    ddRtcClasse.avisar();
+  // ---- compatibilidade tributária IBS/CBS (Anexo VIII da NFS-e) ------------------------------ //
+  var mostrarTodosTributos = false;
+  Map<String, dynamic> compat = const {};
+  final todasIndOp = ddRtcIndOp.opcoes;
+  final todosCst = ddRtcCst.opcoes;
+  final classesPorCst = <String, List<Opcao>>{};
+  Set<String> compativeis(String chave) => {
+    for (final v in (compat[chave] as List?) ?? const []) '$v',
+  };
+  bool foraDoAnexo(String chave, String? codigo) {
+    if (codigo == null || codigo.isEmpty) return false;
+    final previstos = compativeis(chave);
+    return previstos.isNotEmpty && !previstos.contains(codigo);
   }
+
+  // Recalcula após mudanças nos campos ou quando o filtro limpa uma seleção.
+  var avisosTributos = <String>[];
+  void recalcularAvisosTributos() {
+    try {
+      avisosTributos = ja<List>('catalogo.avisos_correlacao', {
+        'trib_nac': fTribNac.dd.valor ?? '',
+        'nbs': fNbs.dd.valor ?? '',
+        'indop': ddRtcIndOp.valor ?? '',
+        'cclasstrib': ddRtcClasse.valor ?? '',
+      }).cast<String>();
+    } catch (_) {
+      avisosTributos = [];
+    }
+    final cst = ddRtcCst.valor;
+    if (foraDoAnexo('csts', cst)) {
+      avisosTributos.add(
+        'A situação tributária $cst não está prevista para o NBS '
+        '${fNbs.dd.valor} no Anexo VIII.',
+      );
+    }
+  }
+
+  void aplicarOpcoes(
+    Suspensa campo,
+    List<Opcao> todas,
+    String chave,
+    String? selecionada,
+  ) {
+    final previstos = mostrarTodosTributos
+        ? const <String>{}
+        : compativeis(chave);
+    campo.opcoes = previstos.isEmpty
+        ? todas
+        : [for (final opcao in todas) if (previstos.contains(opcao.chave)) opcao];
+    campo.por(campo.opcoes.any((o) => o.chave == selecionada) ? selecionada : null);
+    campo.avisar();
+  }
+
+  void classes(String? escolhida) {
+    final cst = ddRtcCst.valor;
+    final todas = cst == null
+        ? const <Opcao>[]
+        : classesPorCst.putIfAbsent(
+            cst,
+            () => opcoesDe(jaPares('catalogo.class_options', {'cst': cst})),
+          );
+    aplicarOpcoes(ddRtcClasse, todas, 'cclasstrib', escolhida);
+    recalcularAvisosTributos();
+  }
+
+  void atualizarCompatibilidade() {
+    try {
+      compat = jaMapa('catalogo.compatibilidade', {
+        'nbs': fNbs.dd.valor ?? '',
+        'trib_nac': fTribNac.dd.valor ?? '',
+      });
+    } catch (_) {
+      compat = const {};
+    }
+  }
+
+  void filtrarTributos(String? classe) {
+    aplicarOpcoes(ddRtcIndOp, todasIndOp, 'indop', ddRtcIndOp.valor);
+    aplicarOpcoes(ddRtcCst, todosCst, 'csts', ddRtcCst.valor);
+    classes(classe);
+  }
+
 
   String vencimentoAutomaticoIso() =>
       ja<String>('cadastro.calcular_vencimento', {
@@ -645,7 +722,7 @@ void abrirCliente(
         ),
       ], justa: true),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(config)),
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(config), idLayout: 'ClienteForm.botaoCancelar3'),
         Botao(
           'Salvar',
           icone: Icons.save,
@@ -661,6 +738,7 @@ void abrirCliente(
             app.fecharEsta(config);
             d.atualizar();
           },
+          idLayout: 'ClienteForm.botaoSalvar2',
         ),
       ],
       idLayout: 'Vencimento.configuracao',
@@ -723,7 +801,14 @@ void abrirCliente(
     ddRtcDest.por(s('rtc_indDest'));
     ddRtcIndOp.por(s('rtc_cIndOp'));
     ddRtcCst.por(s('rtc_CST'));
-    classes(s('rtc_CST'), s('rtc_cClassTrib'));
+    atualizarCompatibilidade();
+    final classe = s('rtc_cClassTrib');
+    // Uma escolha salva fora do Anexo VIII continua visível e acompanhada do aviso.
+    mostrarTodosTributos =
+        foraDoAnexo('indop', ddRtcIndOp.valor) ||
+        foraDoAnexo('csts', ddRtcCst.valor) ||
+        foraDoAnexo('cclasstrib', classe);
+    filtrarTributos(classe);
     ddDestTipo.por(s('dest_tipo').isEmpty ? 'CNPJ' : s('dest_tipo'));
     fDestDoc.text = s('dest_documento');
     fDestNome.text = s('dest_xNome');
@@ -1372,6 +1457,7 @@ void abrirCliente(
     required bool travado,
     double? larguraMenu,
     ValueChanged<String?>? aoSelecionar,
+    bool preservarSelecaoAoBuscar = false,
   }) => ListaSuspensa(
     estado: s,
     rotulo: rotulo,
@@ -1380,6 +1466,7 @@ void abrirCliente(
     editavel: true,
     filtrar: true,
     substituirAoFocar: true,
+    preservarSelecaoAoBuscar: preservarSelecaoAoBuscar,
     desabilitado: travado,
     larguraMenu: larguraMenu,
     aoSelecionar: aoSelecionar,
@@ -1739,6 +1826,7 @@ void abrirCliente(
                                         }
                                         d.atualizar();
                                       },
+                                      idLayout: 'ClienteForm.botaoIconeContatoPrincipal',
                                     ),
                                   if (r.categoria == 'outros')
                                     const SizedBox(width: 32),
@@ -1814,6 +1902,7 @@ void abrirCliente(
                                   dica: 'Remover contato',
                                   desabilitado: t,
                                   aoClicar: () => removerContato(r),
+                                  idLayout: 'ClienteForm.botaoIconeRemoverContato',
                                 ),
                               ),
                             ),
@@ -1851,6 +1940,7 @@ void abrirCliente(
               acertarPrincipais();
               d.atualizar();
             },
+            idLayout: 'ClienteForm.botaoAdicionarContato',
           ),
         Padding(
           padding: const EdgeInsets.only(right: 32),
@@ -1882,6 +1972,7 @@ void abrirCliente(
       TamanhosServicosTributos.campoRotulo,
       travado: t,
       larguraMenu: larguraMenuCatalogo,
+      preservarSelecaoAoBuscar: true,
       aoSelecionar: (v) {
         c.por(v ?? '');
         c.dd.avisar();
@@ -1890,6 +1981,8 @@ void abrirCliente(
             fLocMun.text.trim().isNotEmpty) {
           fLocPrest.text = fLocMun.text.trim();
         }
+        atualizarCompatibilidade();
+        filtrarTributos(ddRtcClasse.valor);
         d.atualizar(); // o código de tributação decide se os blocos de locação aparecem
       },
     );
@@ -1969,12 +2062,14 @@ void abrirCliente(
                           (locacao ? fLocVenc : fCondVenc).clear();
                           d.atualizar();
                         },
+                        idLayout: 'ClienteForm.botaoIconeLimparVencimento',
                       ),
                     BotaoIcone(
                       Icons.calendar_month,
                       dica: 'Escolher no calendário',
                       desabilitado: t || vencAutomatico,
                       aoClicar: () => escolherVencimento(locacao),
+                      idLayout: 'ClienteForm.botaoIconeEscolherNoCalendario',
                     ),
                   ],
                 ),
@@ -2675,13 +2770,14 @@ void abrirCliente(
         negrito('IBS/CBS'),
         Marcar(
           valor: plataformaDigital,
-          rotulo:
-              'Operação abrangida pelo art. 22 da LC 214/2025 (plataforma digital)',
+          rotulo: rotuloPlataformaDigital,
+          dica: dicaPlataformaDigital,
           desabilitado: t,
           aoMudar: (v) {
             plataformaDigital = v ?? false;
             d.atualizar();
           },
+          idLayout: 'ClienteForm.marcarOperacaoAbrangidaPeloArt',
         ),
         lin(
           [
@@ -2697,6 +2793,11 @@ void abrirCliente(
               'Indicador da operação (cIndOp)',
               TamanhosServicosTributos.campoIndicadorDaOperacaoCIndOp,
               travado: t,
+              preservarSelecaoAoBuscar: true,
+              aoSelecionar: (_) {
+                recalcularAvisosTributos();
+                d.atualizar();
+              },
             ),
           ],
           quebra: true,
@@ -2787,8 +2888,9 @@ void abrirCliente(
               'Situação tributária IBS/CBS (CST)',
               TamanhosServicosTributos.campoSituacaoTributariaIBSCBSCST,
               travado: t,
-              aoSelecionar: (v) {
-                classes(v ?? '');
+              preservarSelecaoAoBuscar: true,
+              aoSelecionar: (_) {
+                classes(ddRtcClasse.valor);
                 d.atualizar();
               },
             ),
@@ -2797,11 +2899,38 @@ void abrirCliente(
               'Classificação tributária IBS/CBS',
               TamanhosServicosTributos.campoClassificacaoTributariaIBSCBS,
               travado: t,
+              preservarSelecaoAoBuscar: true,
+              aoSelecionar: (_) {
+                recalcularAvisosTributos();
+                d.atualizar();
+              },
             ),
           ],
           quebra: true,
           idLayout: 'Grupo.cliente_form.lin.24',
         ),
+        if (compat['conhecido'] == true)
+          Marcar(
+            rente: true,
+            valor: mostrarTodosTributos,
+            rotulo: 'Mostrar todos os códigos de IBS/CBS nas listas',
+            dica:
+                'Inclui códigos fora das sugestões do Anexo VIII para o NBS selecionado. '
+                'Ao desmarcar, os códigos selecionados fora dessas sugestões são removidos.',
+            desabilitado: t,
+            aoMudar: (v) {
+              mostrarTodosTributos = v == true;
+              filtrarTributos(ddRtcClasse.valor);
+              d.atualizar();
+            },
+            idLayout: 'ServicosTributos.marcarTodosOsCodigos',
+          ),
+        for (final aviso in avisosTributos)
+          Tx(
+            '⚠ $aviso',
+            cor: Colors.orange.shade800,
+            idLayout: 'ServicosTributos.avisoCorrelacao',
+          ),
         if (eImovel()) ...blocoImovel(locacao: true),
         if (eCondominio()) ...[
           ...blocoImovel(locacao: false),
@@ -2828,21 +2957,15 @@ void abrirCliente(
           quebra: true,
           idLayout: 'Grupo.cliente_form.lin.26',
         ),
-        // A margem negativa alinha o quadradinho com a borda do campo IRRF acima.
-        PuxarEsquerda(
-          recuo: 10,
-          child: Marcar(
-            idLayout: 'Checkbox.cliente_form.1',
-            valor: cbContrib,
-            rotulo: 'Incluir contribuições sociais (PIS + COFINS + CSLL)',
-            sobreposicao: Colors.transparent,
-            raioRespingo: 0,
-            desabilitado: t || naoRetido || semCalc,
-            aoMudar: (v) {
-              cbContrib = v ?? false;
-              acertar();
-            },
-          ),
+        Marcar(
+          idLayout: 'Checkbox.cliente_form.1',
+          valor: cbContrib,
+          rotulo: 'Incluir contribuições sociais (PIS + COFINS + CSLL)',
+          desabilitado: t || naoRetido || semCalc,
+          aoMudar: (v) {
+            cbContrib = v ?? false;
+            acertar();
+          },
         ),
         divisor(),
         negrito('Totais aproximados dos tributos (Lei 12.741)'),
@@ -2889,8 +3012,8 @@ void abrirCliente(
   );
   d.acoes = (_) => emLote
       ? [
-          Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
-          Botao('Confirmar alterações', icone: Icons.check, aoClicar: salvar),
+          Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d), idLayout: 'ClienteForm.botaoCancelar4'),
+          Botao('Confirmar alterações', icone: Icons.check, aoClicar: salvar, idLayout: 'ClienteForm.botaoConfirmarAlteracoes'),
         ]
       : [
           lin(

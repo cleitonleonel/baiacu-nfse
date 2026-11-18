@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../kit/flet.dart';
 import 'app.dart';
+import 'logs.dart';
 import 'sistema.dart';
 
 void abrirAjuda(App app) {
@@ -22,7 +23,11 @@ void abrirAjuda(App app) {
       titulo: (context) => const Text('Ajuda'),
       conteudo: (context) => _conteudo(context, app, info),
       acoes: (context) => [
-        FilledButton(onPressed: app.fecharDialogo, child: const Text('Fechar')),
+        Botao(
+          'Fechar',
+          aoClicar: app.fecharDialogo,
+          idLayout: 'Ajuda.botaoFechar',
+        ),
       ],
       idLayout: 'Janela.ajuda',
     ),
@@ -106,10 +111,14 @@ Widget _conteudo(BuildContext context, App app, Map<String, dynamic> info) {
             'Cofre, e-mail, backup e atualizações.',
         filhos: [
           if (temManual) ...[
-            FilledButton.icon(
-              onPressed: () => app.exigirPermissao('ajuda.manual',()=>abrirCaminho(app, manual)),
-              icon: const Icon(Icons.open_in_new, size: 18),
-              label: const Text('Abrir o manual'),
+            Botao(
+              'Abrir o manual',
+              icone: Icons.open_in_new,
+              aoClicar: () => app.exigirPermissao(
+                'ajuda.manual',
+                () => abrirCaminho(app, manual),
+              ),
+              idLayout: 'Ajuda.botaoAbrirManual',
             ),
             const SizedBox(height: 8),
             SelectableText(
@@ -134,7 +143,8 @@ Widget _conteudo(BuildContext context, App app, Map<String, dynamic> info) {
         texto:
             'Dúvidas, uma ideia de melhoria ou um erro para relatar? Escreva para o e-mail '
             'abaixo. Num erro, conte o que estava fazendo e, se puder, mande uma captura da '
-            'tela. Nunca envie a senha nem o arquivo do certificado.',
+            'tela e o arquivo de "Exportar logs para o suporte" (CPF, CNPJ e e-mail saem '
+            'mascarados). Nunca envie a senha nem o arquivo do certificado.',
         filhos: [
           SelectableText(
             email,
@@ -149,15 +159,29 @@ Widget _conteudo(BuildContext context, App app, Map<String, dynamic> info) {
             spacing: 8,
             runSpacing: 8,
             children: [
-              FilledButton.icon(
-                onPressed: () => app.exigirPermissao('ajuda.contato',()=>abrirUrl(app, 'mailto:$email?subject=$assunto')),
-                icon: const Icon(Icons.mail_outline, size: 18),
-                label: const Text('Escrever e-mail'),
+              Botao(
+                'Escrever e-mail',
+                icone: Icons.mail_outline,
+                aoClicar: () => app.exigirPermissao(
+                  'ajuda.contato',
+                  () => abrirUrl(app, 'mailto:$email?subject=$assunto'),
+                ),
+                idLayout: 'Ajuda.botaoEscreverEmail',
               ),
-              OutlinedButton.icon(
-                onPressed: () => app.exigirPermissao('ajuda.contato',()=>copiar(app,email,aviso:'E-mail copiado.')),
-                icon: const Icon(Icons.copy, size: 18),
-                label: const Text('Copiar'),
+              Botao.contorno(
+                'Copiar',
+                icone: Icons.copy,
+                aoClicar: () => app.exigirPermissao(
+                  'ajuda.contato',
+                  () => copiar(app, email, aviso: 'E-mail copiado.'),
+                ),
+                idLayout: 'Ajuda.botaoCopiarEmail',
+              ),
+              Botao.contorno(
+                'Exportar logs para o suporte',
+                icone: Icons.folder_zip_outlined,
+                aoClicar: () => exportarLogsSuporte(app),
+                idLayout: 'Ajuda.botaoExportarLogs',
               ),
             ],
           ),

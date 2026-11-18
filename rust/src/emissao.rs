@@ -141,6 +141,16 @@ fn agora_s() -> String {
     chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
+/// Avisos de compatibilidade do IBS/CBS (Anexo VIII) de um serviço que leva o grupo IBSCBS.
+/// Não bloqueiam: a tabela é preliminar; a SEFIN pode aceitar ou recusar a combinação.
+pub fn avisos_tributacao(form: &cadastro::ServicoForm, rtc_exigido: bool) -> Vec<String> {
+    let trib = crate::texto::only_digits(&form.cTribNac);
+    if !(rtc_exigido || form.tem_rtc() || crate::leiaute::so_no_novo(&trib)) {
+        return Vec::new();
+    }
+    crate::catalogo::avisos_correlacao(&trib, &form.cNBS, &form.rtc_cIndOp, &form.rtc_cClassTrib)
+}
+
 struct Registro {
     caminho: PathBuf,
     iniciado: String,
@@ -368,12 +378,8 @@ pub fn preview_emissao_com(
         }
     };
     let competencia = competencia_validada(extra)?;
-    let mut erros = form.validate(cadastro::rtc_required(
-        prestador,
-        form,
-        ambiente,
-        competencia,
-    )?);
+    let rtc_exigido = cadastro::rtc_required(prestador, form, ambiente, competencia)?;
+    let mut erros = form.validate(rtc_exigido);
     erros.extend(form.problemas_com_o_prestador(prestador));
     if !erros.is_empty() {
         return Err(Erro::valor(format!(
@@ -405,6 +411,7 @@ pub fn preview_emissao_com(
         "resumo": crate::resumo_dps::resumo(&montada.xml)?,
         "xml": String::from_utf8_lossy(&montada.bonito),
         "validation_issues": varredura.get("issues_count").cloned().unwrap_or(json!(0)),
+        "avisos_tributacao": avisos_tributacao(form, rtc_exigido),
     });
     if assinar {
         let cert = cadastro::cert_da_emissao(prestador, form)?;
@@ -1126,7 +1133,12 @@ const SEM_CERTIFICADO: &str = "Certificado do prestador (ou a senha dele) não e
 fn competencia_validada(extra: &Forcados) -> Res<Option<chrono::NaiveDate>> {
     let Some(valor) = forcado(extra, "dps", "dCompet") else { return Ok(None) };
     let data = parse_iso_date(valor).ok_or_else(|| Erro::valor("Data de competência inválida."))?;
-    if data > chrono::Local::now().date_naive() {
+    // A data de emissão é a da DPS: "agora", salvo quando dhEmi vem informado (os testes fixam
+    // uma emissão em outra data; o programa sempre usa o relógio).
+    let emissao = forcado(extra, "dps", "dhEmi")
+        .and_then(|dh| parse_iso_date(dh.get(..10).unwrap_or(dh)))
+        .unwrap_or_else(|| chrono::Local::now().date_naive());
+    if data > emissao {
         return Err(Erro::valor("A competência não pode ser posterior à data de emissão."));
     }
     Ok(Some(data))

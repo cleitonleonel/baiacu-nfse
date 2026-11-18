@@ -1,6 +1,16 @@
 //! Atualização autenticada por manifesto Ed25519 e SHA-256.
 //! Instalação compartilhada: preparação e instalação protegidas pelo serviço sob demanda.
 //! ZIP portátil: TEMP por usuário e helper sem elevação. Nenhuma URL/comando do cliente é executado pelo serviço.
+//!
+//! REGRA DE COMPATIBILIDADE (vale para toda versão nova): o pacote do botão NÃO troca a pasta
+//! `service/`. Quem atualiza pelo botão continua com o atualizador da versão em que rodou o
+//! instalador pela última vez — no pior caso, o da 1.0.0.2 — até rodar um instalador. Então:
+//! 1. `Baiacu NFS-e.exe --baiacu-validar-inicializacao` tem de sair com o código 42 (main.dart);
+//! 2. os argumentos e o formato do pacote não mudam (raiz "Baiacu NFS-e/", release-version.txt,
+//!    data/app.so, data/dll/nucleo.dll, .sha256 e .sig.json com o manifesto v1);
+//! 3. nada pode depender só do que o instalador cria (serviço de dados, ACLs, marcadores
+//!    novos): sem o serviço, o programa abre no modo antigo (ver `modo_antigo`).
+//! Testar sempre com NFSe/temp/testes/rodar_ensaio_atualizador.py antes de publicar.
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -15,7 +25,7 @@ use crate::erro::{Erro, Res};
 use crate::rede::{Sessao, Tempo};
 
 /// Versão deste programa. `compilar_exe.py` confere que é a mesma do `pubspec.yaml`.
-pub const VERSAO: &str = "1.0.0.4";
+pub const VERSAO: &str = "1.0.0.5";
 /// Repositório onde saem as versões novas (dono/nome).
 pub const REPOSITORIO: &str = "williamlala/baiacu-nfse";
 /// Nome do executável do programa empacotado.
@@ -26,8 +36,13 @@ const PASTA: &str = "atualizacao";
 
 const CHAVE_META: &str = "atualizacao";
 const IDENTIFICACAO: &str = "Baiacu-NFS-e (atualizacao)";
-/// Verificação automática: no máximo uma por este intervalo.
-const INTERVALO_HORAS: i64 = 20;
+/// Intervalos da procura automática que o usuário pode escolher (horas). 0 = só ao abrir o
+/// programa: a cada login, sem procurar de novo com o programa aberto.
+pub const OPCOES_INTERVALO: [u32; 4] = [0, 1, 6, 24];
+/// "Ao abrir o programa".
+pub const AO_ABRIR: u32 = 0;
+/// Intervalo padrão: uma vez por dia.
+const INTERVALO_PADRAO: u32 = 24;
 
 fn erro(msg: impl Into<String>) -> Erro {
     Erro::valor(msg.into())
@@ -58,7 +73,7 @@ pub fn mais_nova(nova: &str, atual: &str) -> bool {
 // --------------------------------------------------------------------------------------------- //
 // Estado (lembrado no banco)
 // --------------------------------------------------------------------------------------------- //
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Estado {
     /// Procurar versão nova sozinho (ao entrar no programa).
@@ -67,20 +82,61 @@ pub struct Estado {
     pub ultima: String,
     /// Versão que o usuário mandou pular.
     pub pular: String,
+    /// De quantas em quantas horas a procura automática consulta o GitHub (1, 6 ou 24), ou
+    /// 0 para procurar a cada abertura do programa.
+    pub intervalo_horas: u32,
+    /// `ETag` da última resposta 200 do GitHub: a próxima consulta é condicional
+    /// (If-None-Match) e um 304 não conta no limite de 60 consultas por hora sem login.
+    pub etag: String,
+    /// A resposta (JSON da release) que acompanha o `etag`, reaproveitada no 304.
+    pub cache: String,
+}
+
+// Padrão explícito: um estado gravado pela 1.0.0.4 não tem `intervalo_horas`, e o 0 do Rust
+// passaria a valer "ao abrir o programa". Sem escolha, continua uma vez por dia.
+impl Default for Estado {
+    fn default() -> Self {
+        Estado {
+            automatica: true,
+            ultima: String::new(),
+            pular: String::new(),
+            intervalo_horas: INTERVALO_PADRAO,
+            etag: String::new(),
+            cache: String::new(),
+        }
+    }
+}
+
+impl Estado {
+    pub fn intervalo(&self) -> u32 {
+        if OPCOES_INTERVALO.contains(&self.intervalo_horas) {
+            self.intervalo_horas
+        } else {
+            INTERVALO_PADRAO
+        }
+    }
+}
+
+/// Atualizado pelo botão a partir da 1.0.0.2: instalação em Program Files sem o serviço
+/// "Baiacu NFSe - Dados" (o pacote do botão não registra serviços). Funciona no modelo antigo,
+/// com os bancos abertos no próprio processo, até alguém rodar o instalador.
+pub fn modo_antigo() -> bool {
+    #[cfg(windows)]
+    {
+        caminhos::instalado_compartilhado() && !crate::dados_windows::servico_registrado()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
 }
 
 fn ler() -> Estado {
     let t = crate::banco::get_meta(CHAVE_META).unwrap_or_default();
     if t.trim().is_empty() {
-        return Estado {
-            automatica: true,
-            ..Estado::default()
-        };
+        return Estado::default();
     }
-    serde_json::from_str(&t).unwrap_or(Estado {
-        automatica: true,
-        ..Estado::default()
-    })
+    serde_json::from_str(&t).unwrap_or_default()
 }
 
 fn gravar(e: &Estado) -> Res<()> {
@@ -94,12 +150,19 @@ pub fn estado() -> Res<Value> {
         "automatica": e.automatica,
         "ultima": e.ultima,
         "pular": e.pular,
+        "intervalo_horas": e.intervalo(),
+        "opcoes_intervalo": OPCOES_INTERVALO,
         "instalavel": instalado().is_some(),
+        "modo_antigo": modo_antigo(),
         "pagina_projeto": format!("https://github.com/{REPOSITORIO}"),
     }))
 }
 
-pub fn configurar(automatica: Option<bool>, pular: Option<&str>) -> Res<Value> {
+pub fn configurar(
+    automatica: Option<bool>,
+    pular: Option<&str>,
+    intervalo_horas: Option<u32>,
+) -> Res<Value> {
     let mut e = ler();
     if let Some(v) = automatica {
         e.automatica = v;
@@ -107,8 +170,28 @@ pub fn configurar(automatica: Option<bool>, pular: Option<&str>) -> Res<Value> {
     if let Some(p) = pular {
         e.pular = p.trim().to_string();
     }
+    if let Some(h) = intervalo_horas {
+        if !OPCOES_INTERVALO.contains(&h) {
+            return Err(erro("Intervalo de procura inválido."));
+        }
+        e.intervalo_horas = h;
+    }
     gravar(&e)?;
     estado()
+}
+
+/// É hora de procurar? Com "ao abrir o programa", só na entrada (`ao_entrar`), sempre. Com
+/// intervalo, quando ele já passou desde a última procura (sem data válida: sim), seja na
+/// entrada, seja com o programa aberto.
+pub fn hora_de_procurar(e: &Estado, agora: chrono::DateTime<chrono::Utc>, ao_entrar: bool) -> bool {
+    if e.intervalo() == AO_ABRIR {
+        return ao_entrar;
+    }
+    chrono::DateTime::parse_from_rfc3339(&e.ultima)
+        .map(|d| {
+            agora.signed_duration_since(d) >= chrono::Duration::hours(i64::from(e.intervalo()))
+        })
+        .unwrap_or(true)
 }
 
 // --------------------------------------------------------------------------------------------- //
@@ -194,55 +277,87 @@ pub fn release_de(v: &Value) -> Res<Release> {
 pub const SEM_PUBLICACAO: &str = "Ainda não há nenhuma versão publicada para download.";
 
 fn ultima_release() -> Res<Release> {
-    ultima_publicada()?.ok_or_else(|| erro(SEM_PUBLICACAO))
+    let mut e = ler();
+    let r = ultima_publicada(&mut e);
+    let _ = gravar(&e);
+    r?.ok_or_else(|| erro(SEM_PUBLICACAO))
 }
 
-/// A última release, ou `None` se ainda não há nenhuma publicada.
-fn ultima_publicada() -> Res<Option<Release>> {
+/// Mensagem do limite do GitHub, com a hora em que ele libera de novo (x-ratelimit-reset).
+fn limite_github(r: &crate::rede::Resposta) -> Erro {
+    let libera = r
+        .cabecalho("x-ratelimit-reset")
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .and_then(|s| chrono::DateTime::from_timestamp(s, 0))
+        .map(|d| d.with_timezone(&chrono::Local).format("%H:%M").to_string());
+    erro(match libera {
+        Some(h) => format!(
+            "O GitHub limitou as consultas deste endereço de internet (60 por hora). Tente de novo depois das {h}."
+        ),
+        None => "O GitHub limitou as consultas por agora. Tente de novo daqui a uma hora.".into(),
+    })
+}
+
+/// A última release, ou `None` se ainda não há nenhuma publicada. A consulta é condicional:
+/// com o `ETag` guardado, o GitHub responde 304 quando nada mudou (sem gastar o limite) e a
+/// resposta guardada é reaproveitada. `e` volta com o novo `ETag`/cache; quem chama grava.
+pub fn ultima_publicada(e: &mut Estado) -> Res<Option<Release>> {
     let url = format!("https://api.github.com/repos/{REPOSITORIO}/releases/latest");
-    let r = sessao(20.0)?.get(
-        &url,
-        &[
-            ("Accept", "application/vnd.github+json"),
-            ("X-GitHub-Api-Version", "2022-11-28"),
-        ],
-    )?;
-    match r.status {
-        200 => {}
-        404 => return Ok(None),
-        403 | 429 => {
-            return Err(erro(
-                "O GitHub limitou as consultas por agora. Tente de novo daqui a uma hora.",
-            ));
+    let mut cabecalhos = vec![
+        ("Accept", "application/vnd.github+json"),
+        ("X-GitHub-Api-Version", "2022-11-28"),
+    ];
+    let etag = e.etag.clone();
+    if !etag.is_empty() && !e.cache.is_empty() {
+        cabecalhos.push(("If-None-Match", etag.as_str()));
+    }
+    let r = sessao(20.0)?.get(&url, &cabecalhos)?;
+    let corpo: Value = match r.status {
+        200 => {
+            let v = r
+                .json()
+                .ok_or_else(|| erro("Resposta do GitHub ilegível."))?;
+            e.etag = r.cabecalho("etag").unwrap_or("").trim().to_string();
+            e.cache = if e.etag.is_empty() { String::new() } else { v.to_string() };
+            v
         }
+        304 => match serde_json::from_str(&e.cache) {
+            Ok(v) => v,
+            Err(_) => {
+                // Cache estragado: a próxima consulta vai sem condição.
+                e.etag.clear();
+                e.cache.clear();
+                return Err(erro("Resposta guardada do GitHub ilegível. Procure de novo."));
+            }
+        },
+        404 => {
+            e.etag.clear();
+            e.cache.clear();
+            return Ok(None);
+        }
+        403 | 429 => return Err(limite_github(&r)),
         s => {
             return Err(erro(format!(
                 "O GitHub respondeu {s} ao procurar a versão nova."
             )));
         }
-    }
-    release_de(
-        &r.json()
-            .ok_or_else(|| erro("Resposta do GitHub ilegível."))?,
-    )
-    .map(Some)
+    };
+    release_de(&corpo).map(Some)
 }
 
-/// Procura versão nova. `automatica`: chamada sozinha ao entrar — respeita o intervalo, o
+/// Procura versão nova. `automatica`: chamada sozinha (logo depois do login, com `ao_entrar`,
+/// ou de tempos em tempos com o programa aberto) — respeita a frequência escolhida, o
 /// "procurar sozinho" desligado e a versão pulada (devolve `{"disponivel": false}` sem ir à
 /// internet quando não é hora).
-pub fn verificar(automatica: bool) -> Res<Value> {
+pub fn verificar(automatica: bool, ao_entrar: bool) -> Res<Value> {
     let mut e = ler();
     let agora = chrono::Utc::now();
-    if automatica {
-        let recente = chrono::DateTime::parse_from_rfc3339(&e.ultima)
-            .map(|d| agora.signed_duration_since(d) < chrono::Duration::hours(INTERVALO_HORAS))
-            .unwrap_or(false);
-        if !e.automatica || recente {
-            return Ok(json!({ "disponivel": false, "versao_atual": VERSAO, "consultou": false }));
-        }
+    if automatica && (!e.automatica || !hora_de_procurar(&e, agora, ao_entrar)) {
+        return Ok(json!({ "disponivel": false, "versao_atual": VERSAO, "consultou": false }));
     }
-    let resultado = ultima_publicada();
+    let resultado = ultima_publicada(&mut e);
+    // A contagem recomeça a cada procura, deu certo ou não: um GitHub fora do ar não vira
+    // uma consulta a cada abertura do programa.
     e.ultima = agora.to_rfc3339();
     let _ = gravar(&e);
     let Some(r) = resultado? else {
@@ -530,6 +645,34 @@ pub fn instalar(versao_confirmada: Option<&str>) -> Res<Value> {
 mod testes {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn intervalo_da_procura_automatica() {
+        let agora = chrono::Utc::now();
+        let mut e = Estado::default();
+        assert_eq!(e.intervalo(), 24); // sem escolha: uma vez por dia
+        assert!(e.automatica);
+        assert!(hora_de_procurar(&e, agora, true)); // nunca procurou
+        e.ultima = (agora - chrono::Duration::minutes(90)).to_rfc3339();
+        assert!(!hora_de_procurar(&e, agora, true));
+        e.intervalo_horas = 1;
+        assert!(hora_de_procurar(&e, agora, false));
+        e.intervalo_horas = 6;
+        assert!(!hora_de_procurar(&e, agora, true));
+        e.intervalo_horas = 7; // fora das opções: volta ao padrão
+        assert_eq!(e.intervalo(), 24);
+        // "Ao abrir o programa": a cada login, mesmo que tenha procurado há pouco; nunca com
+        // o programa aberto.
+        e.intervalo_horas = AO_ABRIR;
+        e.ultima = agora.to_rfc3339();
+        assert!(hora_de_procurar(&e, agora, true));
+        assert!(!hora_de_procurar(&e, agora, false));
+        // Estado gravado pela 1.0.0.4 (sem os campos novos) continua uma vez por dia.
+        let antigo: Estado =
+            serde_json::from_str(r#"{"automatica":true,"ultima":"","pular":""}"#).unwrap();
+        assert_eq!(antigo.intervalo(), 24);
+        assert!(antigo.etag.is_empty());
+    }
 
     #[test]
     fn compara_versoes() {

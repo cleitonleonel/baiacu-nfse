@@ -166,12 +166,23 @@ class _TelaAcessoState extends State<TelaAcesso> {
           itens: [
             texto('Não foi possível iniciar o Baiacu', tamanho: Letra.titulo),
             texto(_erroDePartida),
-            FilledButton(
-              onPressed: () {
-                _ir(_Tela.carregando);
-                _decidir();
-              },
-              child: const Text('Tentar novamente'),
+            ElementoLayoutGenerico(
+              width: TamanhosAcesso.botaoAcao.largura,
+              height: TamanhosAcesso.botaoAcao.altura,
+              idLayout: 'TamanhosAcesso.botaoTentarNovamente',
+              textoOriginal: 'Tentar novamente',
+              child: FilledButton(
+                onPressed: () {
+                  _ir(_Tela.carregando);
+                  _decidir();
+                },
+                child: Text(
+                  ajusteLayout(
+                    context,
+                    'TamanhosAcesso.botaoTentarNovamente',
+                  ).exibir('Tentar novamente'),
+                ),
+              ),
             ),
           ],
         ),

@@ -92,10 +92,11 @@ pub fn show_info(message: &str) {
 }
 
 pub fn show_error(message: &str) {
+    let message = update::clarear_os(message);
     unsafe {
         MessageBoxW(
             std::ptr::null_mut(),
-            wide(std::ffi::OsStr::new(message)).as_ptr(),
+            wide(std::ffi::OsStr::new(&message)).as_ptr(),
             wide(std::ffi::OsStr::new("Atualização do Baiacu")).as_ptr(),
             MB_OK | MB_ICONERROR,
         );
@@ -569,6 +570,10 @@ fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> 
         return Err("Operação inválida".into());
     }
     let old = fs::read_to_string(root.join("release-version.txt"))?;
+    update::log(format!(
+        "Pedido do Baiacu (pid {pid}): {action} da versão {desired}; instalada {}.",
+        old.trim()
+    ));
     if update::version(desired)? <= update::version(old.trim())? {
         return Err("Versão antiga recusada".into());
     }
@@ -584,7 +589,9 @@ fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> 
         // na preparação; a extração abaixo reconfere seu hash, sem novo download.
         let token = user_token(&process)?;
         running()?;
+        update::log("Aguardando o Baiacu fechar…");
         wait_app(&process)?;
+        update::log("Baiacu fechado. Conferindo e extraindo o pacote preparado.");
         let install_area = tempfile::Builder::new()
             .prefix("apply-")
             .tempdir_in(root.join("service"))?;
@@ -594,6 +601,7 @@ fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> 
             &install_area.path().join("novo"),
             &manifest,
         )?;
+        update::log("Parando o serviço de dados (se houver).");
         parar_dados(false)?;
         let result = update::install(&source, &root, || {
             crate::startup_probe::check(&root, Some(&token))
@@ -602,19 +610,6 @@ fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> 
             let _ = fs::remove_dir_all(&prepared);
         }
         return result;
-    }
-    if update::verify_prepared(&prepared, update::PUBLIC_KEY, desired).is_ok() {
-        progress(
-            &root,
-            desired,
-            pid,
-            action,
-            100,
-            "Pacote já preparado e verificado",
-            true,
-        )?;
-        running()?;
-        return Ok(());
     }
     progress(
         &root,
@@ -655,6 +650,44 @@ fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> 
     let temp = tempfile::Builder::new()
         .prefix("stage-")
         .tempdir_in(root.join("service"))?;
+    // O .sha256 publicado vem primeiro: um pacote já preparado só é reaproveitado se for
+    // exatamente o publicado agora (a mesma versão pode ter sido republicada).
+    let sha_file = temp.path().join("release.sha256");
+    download(
+        &agent,
+        &url(&format!("{file}.sha256"))?,
+        &sha_file,
+        1024,
+        |_, _| Ok(()),
+    )?;
+    let publicado = fs::read_to_string(&sha_file)?
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match update::verify_prepared(&prepared, update::PUBLIC_KEY, desired) {
+        Ok(m) if m.sha256.to_ascii_lowercase() == publicado => {
+            update::log("Pacote já preparado confere com o .sha256 publicado: reaproveitado.");
+            progress(
+                &root,
+                desired,
+                pid,
+                action,
+                100,
+                "Pacote já preparado e verificado",
+                true,
+            )?;
+            return Ok(());
+        }
+        Ok(_) => update::log(
+            "Pacote preparado difere do .sha256 publicado (versão republicada): baixando de novo.",
+        ),
+        Err(e) if prepared.exists() => {
+            update::log(format!("Pacote preparado inválido ({e}): baixando de novo."))
+        }
+        Err(_) => {}
+    }
+    update::log("Baixando assinatura e pacote.");
     let signature = temp.path().join("release.sig.json");
     download(
         &agent,
@@ -664,15 +697,7 @@ fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> 
         |_, _| Ok(()),
     )?;
     let manifest = update::verify(&fs::read(signature)?, update::PUBLIC_KEY, desired)?;
-    let sha_file = temp.path().join("release.sha256");
-    download(
-        &agent,
-        &url(&format!("{file}.sha256"))?,
-        &sha_file,
-        1024,
-        |_, _| Ok(()),
-    )?;
-    if fs::read_to_string(sha_file)?.split_whitespace().next() != Some(manifest.sha256.as_str()) {
+    if publicado != manifest.sha256.to_ascii_lowercase() {
         return Err("SHA-256 publicado diverge do manifesto assinado".into());
     }
     let zip = temp.path().join("release.zip");
@@ -715,6 +740,7 @@ fn service_update(args: Vec<OsString>, running: impl FnOnce() -> Result<()>) -> 
     }
     let stage = temp.keep();
     fs::rename(&stage, &prepared)?;
+    update::log("Pacote baixado, verificado e pronto para instalar.");
     progress(
         &root,
         desired,
@@ -745,12 +771,16 @@ fn service_main(args: Vec<OsString>) {
         handle.set_service_status(status(ServiceState::Running, 0))?;
         Ok(())
     });
+    match &result {
+        Ok(()) => update::log("Serviço de atualização concluído sem erros."),
+        Err(e) => update::log(format!("Serviço de atualização terminou com erro: {e}")),
+    }
     if let Ok(root) = root() {
         let _ = fs::write(
             root.join("service/last-result.txt"),
             match &result {
                 Ok(_) => "Atualização concluída.".to_owned(),
-                Err(e) => format!("Falha na atualização: {e}"),
+                Err(e) => update::clarear_os(&format!("Falha na atualização: {e}")),
             },
         );
     }
@@ -780,6 +810,11 @@ fn watch() -> Result<()> {
         std::thread::sleep(Duration::from_millis(500));
     };
     let root = root()?;
+    update::log(if failed {
+        "Atualização terminou com falha; reabrindo o Baiacu."
+    } else {
+        "Atualização terminou; reabrindo o Baiacu."
+    });
     std::process::Command::new(root.join(EXE))
         .current_dir(&root)
         .env("NFSE_REABRIR", "1")
@@ -795,6 +830,20 @@ fn watch() -> Result<()> {
 }
 pub fn run() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
+    // --check e --verify são consultas rápidas da tela: não poluem o registro.
+    if !matches!(args.get(1).map(String::as_str), None | Some("--check" | "--verify"))
+        && let Ok(raiz) = root()
+    {
+        update::definir_log(raiz.join("service/atualizador.log"));
+    }
+    let resultado = executar(&args);
+    if let Err(e) = &resultado {
+        update::log(format!("{}: erro: {e}", args.get(1).map_or("", String::as_str)));
+    }
+    resultado
+}
+
+fn executar(args: &[String]) -> Result<()> {
     match args.get(1).map(String::as_str) {
         Some("--check") => {
             if hex::decode(update::PUBLIC_KEY.trim())?.len() != 32 {
@@ -830,17 +879,20 @@ pub fn run() -> Result<()> {
             }
             // O programa que pediu a recuperação acabou de sair; o Windows pode levar um instante
             // para soltar o executável dele. Tenta por até ~10 s antes de desistir.
+            update::log("Recuperação pedida (--recover).");
             let mut tentativa = 0;
             loop {
                 match update::recover(&root) {
                     Ok(()) => break,
-                    Err(_) if tentativa < 20 => {
+                    Err(e) if tentativa < 20 => {
                         tentativa += 1;
+                        update::log(format!("Recuperação, tentativa {tentativa}: {e}"));
                         std::thread::sleep(Duration::from_millis(500));
                     }
                     Err(e) => return Err(e),
                 }
             }
+            update::log("Recuperação concluída: versão anterior restaurada.");
             // Chamado pelo programa (que já saiu), avisa; pelo instalador (--silencioso), não.
             if args.get(2).map(String::as_str) != Some("--silencioso") {
                 show_info("A versão anterior do Baiacu foi restaurada. Pode abrir o programa de novo.");
@@ -902,6 +954,7 @@ pub fn run() -> Result<()> {
             } else {
                 prepare()?
             };
+            update::log(format!("Atualização portátil para {desired}: aguardando o Baiacu fechar."));
             wait_app(&process)?;
             let result: Result<()> = (|| {
                 let m = update::verify(

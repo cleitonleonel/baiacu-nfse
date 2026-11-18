@@ -101,7 +101,7 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
 set(NUCLEO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../rust")
 set(NUCLEO_TARGET_DIR "$ENV{CARGO_TARGET_DIR}")
 if(NOT NUCLEO_TARGET_DIR)
-  set(NUCLEO_TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../extras/cache/target_cargo")
+  set(NUCLEO_TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../compilacao/cache/target_cargo")
 endif()
 add_custom_target(nucleo_rust ALL
   COMMAND cargo build --release --locked --workspace --target-dir "${NUCLEO_TARGET_DIR}"

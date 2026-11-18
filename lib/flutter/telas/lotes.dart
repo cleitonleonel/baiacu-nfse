@@ -365,10 +365,11 @@ class _TelaLotesState extends State<TelaLotes> {
                 app.fecharEsta(d);
                 _confirmarExclusao(alvo);
               },
+              idLayout: 'Lotes.botaoExcluirLote',
             ),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
-        Botao(renomear ? 'Renomear' : 'Criar', aoClicar: confirmar),
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d), idLayout: 'Lotes.nome.botaoCancelar'),
+        Botao(renomear ? 'Renomear' : 'Criar', aoClicar: confirmar, idLayout: 'Lotes.nome.botaoConfirmar'),
       ],
     );
     nome = d.texto(nomeAnterior);
@@ -391,9 +392,10 @@ class _TelaLotesState extends State<TelaLotes> {
           app.fecharEsta(d);
           _excluir(alvo);
         },
+        idLayout: 'Lotes.botaoExcluirLote2',
       ),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d), idLayout: 'Lotes.botaoCancelar2'),
       ],
     );
     app.mostrarDialogo(d);
@@ -444,7 +446,7 @@ class _TelaLotesState extends State<TelaLotes> {
       conteudo: (_) =>
           const Tx('Descartar as alterações ainda não salvas neste lote?'),
       acoes: (_) => [
-        Botao.texto('Continuar editando', aoClicar: () => app.fecharEsta(d)),
+        Botao.texto('Continuar editando', aoClicar: () => app.fecharEsta(d), idLayout: 'Lotes.botaoContinuarEditando'),
         Botao(
           'Descartar alterações',
           aoClicar: () {
@@ -467,6 +469,7 @@ class _TelaLotesState extends State<TelaLotes> {
               app.toast('$e', erro: true);
             }
           },
+          idLayout: 'Lotes.botaoDescartarAlteracoes',
         ),
       ],
     );
@@ -594,9 +597,12 @@ class _TelaLotesState extends State<TelaLotes> {
             enabled: !desabilitado,
             mouseCursor: desabilitado ? null : SystemMouseCursors.click,
             hoverColor: hover,
-            leading: Checkbox(
-              value: noLote || selecionado,
-              onChanged: desabilitado ? null : (v) => marcar(par, v == true),
+            leading: Marcar(
+              valor: noLote || selecionado,
+              desabilitado: desabilitado,
+              aoMudar: (v) => marcar(par, v == true),
+              idLayout: 'Lotes.adicionar.marcarServico',
+              rente: false, // mantém a área de toque do leading do ListTile
             ),
             title: Tx(
               '${s['nome']}',
@@ -883,11 +889,24 @@ class _TelaLotesState extends State<TelaLotes> {
     final modelo = lote!;
     setState(() => ocupado = true);
     bool repetido;
+    var avisos = <Map<String, dynamic>>[];
     try {
       repetido = await chamar<bool>('lotes.repetido_intervalo', {
         'prestador': prest,
         'id': modelo['id'],
       });
+      try {
+        avisos = [
+          for (final a in await chamar<List>('lotes.avisos_tributacao', {
+            'prestador': prest,
+            'id': modelo['id'],
+          }))
+            Map<String, dynamic>.from(a as Map),
+        ];
+      } catch (e) {
+        // A conferência é só orientação: uma falha nela não impede o envio.
+        registrar('Falha ao conferir a tributação do lote: $e', nivel: 'warning');
+      }
     } catch (e) {
       if (mounted) app.toast('$e', erro: true);
       return;
@@ -900,7 +919,7 @@ class _TelaLotesState extends State<TelaLotes> {
         app.ambiente != amb) {
       return;
     }
-    _confirmarEnvio(modelo, prest, amb, repetido: repetido);
+    _confirmarEnvio(modelo, prest, amb, repetido: repetido, avisos: avisos);
   }
 
   void _confirmarEnvio(
@@ -908,6 +927,7 @@ class _TelaLotesState extends State<TelaLotes> {
     String prest,
     String amb, {
     required bool repetido,
+    List<Map<String, dynamic>> avisos = const [],
   }) {
     final total = (modelo['linhas'] as List).length;
     final notas = total == 1 ? '1 nota' : '$total notas';
@@ -931,6 +951,21 @@ class _TelaLotesState extends State<TelaLotes> {
           Tx(
             'Deseja transmitir $notas do lote “${modelo['nome']}” em $ambiente?',
           ),
+          if (avisos.isNotEmpty) ...[
+            Tx(
+              '${avisos.length == 1 ? '1 linha tem' : '${avisos.length} linhas têm'} combinação '
+              'tributária (IBS/CBS) fora do Anexo VIII da NFS-e e pode ser recusada:',
+              cor: Colors.orange.shade800,
+              peso: FontWeight.w600,
+            ),
+            for (final a in avisos.take(5))
+              Tx(
+                '• ${a['tomador']} · ${a['servico']}: ${((a['avisos'] as List?) ?? const []).join(' ')}',
+                tam: Letra.apoio,
+              ),
+            if (avisos.length > 5)
+              Tx('… e mais ${avisos.length - 5}.', tam: Letra.apoio),
+          ],
           if (repetido) ...[
             Tx(
               'Este lote já teve uma transmissão iniciada no intervalo configurado. '
@@ -953,12 +988,13 @@ class _TelaLotesState extends State<TelaLotes> {
         espaco: 12,
       ),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d), idLayout: 'Lotes.transmitir.botaoCancelar'),
         Botao(
           'Transmitir lote',
           icone: Icons.send_outlined,
           desabilitado: !confirmado(),
           aoClicar: transmitir,
+          idLayout: 'Lotes.botaoTransmitirLote',
         ),
       ],
     );
@@ -1191,13 +1227,14 @@ class _TelaLotesState extends State<TelaLotes> {
             'Atualizar a competência de todas as linhas do lote para ${dataIsoParaBr(dataIso(data))}?',
           ),
           acoes: (_) => [
-            Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
+            Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d), idLayout: 'Lotes.botaoCancelar4'),
             Botao(
               'Confirmar',
               aoClicar: () {
                 app.fecharEsta(d);
                 aplicar();
               },
+              idLayout: 'Lotes.botaoConfirmar',
             ),
           ],
         );
@@ -1217,7 +1254,7 @@ class _TelaLotesState extends State<TelaLotes> {
         'Excluir ${nomesClientes[linha['tomador']] ?? linha['tomador']} e o serviço ${linha['form']['nome'] ?? linha['servico']} deste lote?',
       ),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d), idLayout: 'Lotes.botaoCancelar5'),
         Botao(
           'Excluir linha',
           aoClicar: () {
@@ -1229,6 +1266,7 @@ class _TelaLotesState extends State<TelaLotes> {
               sujo = true;
             });
           },
+          idLayout: 'Lotes.botaoExcluirLinha',
         ),
       ],
     );
@@ -1347,6 +1385,7 @@ class _TelaLotesState extends State<TelaLotes> {
           rotulo: 'Registros',
           largura: 320,
           buscar: false,
+          idLayout: 'Lotes.listaRegistros',
         ),
         const Tx('Relatório', peso: FontWeight.w600),
         lin(
@@ -1363,6 +1402,7 @@ class _TelaLotesState extends State<TelaLotes> {
                   }
                   d.atualizar();
                 },
+                idLayout: 'HistoricoLotes.exportar.marcarFormato',
               ),
           ],
           quebra: true,
@@ -1378,14 +1418,17 @@ class _TelaLotesState extends State<TelaLotes> {
                 xml = v == true;
                 d.atualizar();
               },
+              idLayout: 'Lotes.marcarXmlDasNfsE',
             ),
             Marcar(
               rotulo: 'DANFSe (.pdf)',
+              rente: false, // vem depois da opção de XML
               valor: danfse,
               aoMudar: (v) {
                 danfse = v == true;
                 d.atualizar();
               },
+              idLayout: 'Lotes.marcarDanfsePdf',
             ),
           ],
           quebra: true,
@@ -1393,7 +1436,7 @@ class _TelaLotesState extends State<TelaLotes> {
         ),
       ], justa: true),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d), idLayout: 'HistoricoLotes.exportar.botaoCancelar'),
         Botao(
           'Exportar',
           icone: Icons.download,
@@ -1411,6 +1454,7 @@ class _TelaLotesState extends State<TelaLotes> {
               danfse,
             );
           },
+          idLayout: 'HistoricoLotes.exportar.botaoExportar',
         ),
       ],
     );
@@ -1505,7 +1549,7 @@ class _TelaLotesState extends State<TelaLotes> {
       conteudo: (_) =>
           const Tx('Importe um lote do Baiacu ou exporte o lote selecionado.'),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d), idLayout: 'Lotes.botaoCancelar7'),
         const Spacer(),
         Botao.contorno(
           'Importar',
@@ -1513,6 +1557,7 @@ class _TelaLotesState extends State<TelaLotes> {
             app.fecharEsta(d);
             importar();
           },
+          idLayout: 'Lotes.botaoImportar',
         ),
         Botao(
           'Exportar',
@@ -1521,6 +1566,7 @@ class _TelaLotesState extends State<TelaLotes> {
             app.fecharEsta(d);
             exportar();
           },
+          idLayout: 'Lotes.botaoExportar2',
         ),
       ],
     );
@@ -1632,7 +1678,7 @@ class _TelaLotesState extends State<TelaLotes> {
             : 'Concluir a execução com as pendências atuais? As linhas e o histórico continuarão visíveis.',
       ),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d)),
+        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d), idLayout: 'Lotes.pendencia.botaoCancelar'),
         Botao(
           remover ? 'Remover linha' : 'Finalizar lote',
           aoClicar: () {
@@ -1642,6 +1688,7 @@ class _TelaLotesState extends State<TelaLotes> {
               linha: linha,
             );
           },
+          idLayout: 'Lotes.pendencia.botaoConfirmar',
         ),
       ],
     );
@@ -1849,6 +1896,7 @@ class _TelaLotesState extends State<TelaLotes> {
                     erro,
                     podeRetransmitir: tratando && _retransmissivel(estado),
                   ),
+                  idLayout: 'Lotes.botaoIconeInformacoesDaEmissao',
                 ),
             ],
           ),
@@ -1888,7 +1936,7 @@ class _TelaLotesState extends State<TelaLotes> {
         espaco: 8,
       ),
       acoes: (_) => [
-        Botao.texto('Fechar', aoClicar: () => app.fecharEsta(d)),
+        Botao.texto('Fechar', aoClicar: () => app.fecharEsta(d), idLayout: 'Lotes.resultadoEmissao.botaoFechar'),
         if (podeRetransmitir)
           Botao(
             'Tentar retransmitir',
@@ -2055,6 +2103,7 @@ class _TelaLotesState extends State<TelaLotes> {
                       Botao.texto(
                         'Parar após esta nota',
                         aoClicar: () => setState(() => parar = true),
+                        idLayout: 'Lotes.botaoPararAposEstaNota',
                       ),
                     if (!emitindo && !execucaoConcluida && selecionado) ...[
                       Botao.contorno(
@@ -2133,17 +2182,17 @@ class _TelaLotesState extends State<TelaLotes> {
       return SizedBox(
         width: largura,
         height: altura,
-        child: TextButton(
-          style: TextButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            minimumSize: Size.zero,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-          onPressed: desabilitado ? null : () => escolherCompetencia(linha),
-          child: Text(
+        child: Botao.texto(
+          null,
+          compacto: true,
+          desabilitado: desabilitado,
+          dica: 'Escolher a competência',
+          aoClicar: () => escolherCompetencia(linha),
+          filho: Text(
             valor,
             style: ajuste.estilo(const TextStyle(fontSize: Letra.tabela)),
           ),
+          idLayout: 'Lotes.botaoEscolherACompetencia',
         ),
       );
     }

@@ -27,13 +27,18 @@ pub fn executar(metodo: &str, a: &Value, avisar: crate::despacho::Avisar) -> Opt
         "doacao.apos_emissao" => {
             crate::doacao::apos_emissao(logico(a, "producao")).map(Value::Bool)
         }
+        // ---- tabelas tributárias oficiais ------------------------------------------------ //
+        "catalogo.atualizar_tabelas" => crate::catalogo::atualizar_tabelas(avisar),
         // ---- atualização --------------------------------------------------------------- //
         "atualizacao.estado" => crate::atualizacao::estado(),
         "atualizacao.configurar" => crate::atualizacao::configurar(
             a.get("automatica").and_then(Value::as_bool),
             a.get("pular").and_then(Value::as_str),
+            a.get("intervalo_horas").and_then(Value::as_u64).map(|h| h as u32),
         ),
-        "atualizacao.verificar" => crate::atualizacao::verificar(logico(a, "automatica")),
+        "atualizacao.verificar" => {
+            crate::atualizacao::verificar(logico(a, "automatica"), logico(a, "ao_entrar"))
+        }
         "atualizacao.baixar" => crate::atualizacao::baixar(a["versao"].as_str(), avisar),
         "atualizacao.instalar" => crate::atualizacao::instalar(a["versao"].as_str()),
         // ---- aparência ------------------------------------------------------------------ //

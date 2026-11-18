@@ -101,6 +101,28 @@
     ]
   },
   {
+    "id": "clientes.importar",
+    "rotulo": "Importar clientes de planilha",
+    "pai": "clientes",
+    "padrao": 2,
+    "fixo": false,
+    "metodos": [
+      "clientes.modelo_planilha",
+      "clientes.previa_importacao",
+      "clientes.importar_planilha"
+    ]
+  },
+  {
+    "id": "clientes.exportar",
+    "rotulo": "Exportar clientes para planilha",
+    "pai": "clientes",
+    "padrao": 2,
+    "fixo": false,
+    "metodos": [
+      "clientes.exportar_planilha"
+    ]
+  },
+  {
     "id": "clientes.excluir",
     "rotulo": "Excluir cliente",
     "pai": "clientes",
@@ -534,6 +556,26 @@
     ]
   },
   {
+    "id": "config.tabelas",
+    "rotulo": "Atualizar as tabelas tributárias (cClassTrib e Anexo VIII)",
+    "pai": "config",
+    "padrao": 3,
+    "fixo": false,
+    "metodos": [
+      "catalogo.atualizar_tabelas"
+    ]
+  },
+  {
+    "id": "config.logs",
+    "rotulo": "Configurar o tamanho e o prazo dos logs",
+    "pai": "config",
+    "padrao": 3,
+    "fixo": false,
+    "metodos": [
+      "registro.configurar"
+    ]
+  },
+  {
     "id": "config.apoio",
     "rotulo": "Apoiar o projeto",
     "pai": "config",
@@ -562,6 +604,14 @@
     "rotulo": "Escrever / copiar e-mail de suporte",
     "pai": "ajuda",
     "padrao": 1,
+    "fixo": false,
+    "metodos": []
+  },
+  {
+    "id": "ajuda.logs",
+    "rotulo": "Exportar logs para o suporte",
+    "pai": "ajuda",
+    "padrao": 2,
     "fixo": false,
     "metodos": []
   },
@@ -725,7 +775,8 @@
       "lotes.listar",
       "lotes.obter",
       "lotes.historico",
-      "lotes.execucoes"
+      "lotes.execucoes",
+      "lotes.avisos_tributacao"
     ]
   },
   {

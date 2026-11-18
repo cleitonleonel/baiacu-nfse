@@ -206,6 +206,20 @@ fn conferir_linha(prestador: &str, linha: &Linha, ambiente: &str) -> Res<()> {
     Ok(())
 }
 
+/// Avisos de compatibilidade tributária (Anexo VIII) de cada linha, para a tela mostrar antes
+/// de transmitir. Não bloqueia.
+fn avisos_tributacao(prestador: &str, lote: &Lote) -> Res<Value> {
+    validar(prestador, lote)?;
+    let mut out = Vec::new();
+    for linha in &lote.linhas {
+        let avisos = emissao::avisos_tributacao(&linha.form, false);
+        if !avisos.is_empty() {
+            out.push(json!({"linha": linha.id, "servico": linha.servico, "tomador": linha.tomador, "avisos": avisos}));
+        }
+    }
+    Ok(json!(out))
+}
+
 fn conferir(prestador: &str, lote: &Lote, ambiente: &str) -> Res<Value> {
     validar(prestador, lote)?;
     ambiente_valido(prestador, ambiente)?;
@@ -1069,6 +1083,9 @@ pub fn executar(metodo: &str, a: &Value) -> Res<Value> {
                 .as_i64()
                 .ok_or_else(|| Erro::valor("Revisão ausente."))?,
         ),
+        "lotes.avisos_tributacao" => {
+            avisos_tributacao(p, &obter(p, crate::despacho::texto(a, "id")?)?)
+        }
         "lotes.validar" => conferir(
             p,
             &obter(p, crate::despacho::texto(a, "id")?)?,

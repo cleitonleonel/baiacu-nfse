@@ -8,9 +8,123 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 #[cfg(windows)]
 pub mod client;
+
+// ------------------------------------------------------------------------------------------- //
+// Erros do Windows em português claro
+// ------------------------------------------------------------------------------------------- //
+/// Frase clara para os códigos de erro do Windows que o usuário mais encontra.
+pub fn frase_os(codigo: i32) -> Option<&'static str> {
+    Some(match codigo {
+        2 => "Arquivo não encontrado",
+        3 => "Pasta não encontrada",
+        5 => "Acesso negado",
+        15 => "Unidade de disco não encontrada",
+        19 => "O disco está protegido contra gravação",
+        21 => "A unidade não está pronta",
+        32 => "O arquivo está em uso por outro programa",
+        33 => "Parte do arquivo está bloqueada por outro programa",
+        39 | 112 => "Não há espaço suficiente no disco",
+        53 => "Caminho de rede não encontrado",
+        80 | 183 => "O arquivo ou a pasta já existe",
+        109 | 232 | 233 => "A comunicação com o serviço de dados foi interrompida",
+        123 => "Nome de arquivo ou pasta inválido",
+        145 => "A pasta não está vazia",
+        206 => "Nome ou caminho do arquivo longo demais",
+        225 => "O antivírus bloqueou o arquivo",
+        231 => "O serviço de dados está ocupado",
+        1053 => "O serviço não respondeu a tempo",
+        1060 => "O serviço não está instalado",
+        1062 => "O serviço não está em execução",
+        1224 => "O arquivo está aberto em outro programa",
+        1392 => "O arquivo ou a pasta está corrompido",
+        1450 | 1453 | 1455 => "Recursos do sistema insuficientes",
+        10054 => "A conexão foi interrompida pelo servidor",
+        10060 => "O servidor demorou demais para responder",
+        10061 => "O servidor recusou a conexão",
+        10065 => "Servidor inacessível (verifique a internet)",
+        11001 => "Endereço não encontrado (verifique a internet)",
+        _ => return None,
+    })
+}
+
+/// Troca, dentro de uma mensagem, o texto do Windows de cada "(os error N)" conhecido pela frase
+/// clara: "Falha ao gravar: O processo não pode acessar o arquivo porque ele está sendo usado
+/// por outro processo. (os error 32)" → "Falha ao gravar: O arquivo está em uso por outro
+/// programa (os error 32)". O código fica, para o suporte. Códigos desconhecidos ficam iguais.
+pub fn clarear_os(msg: &str) -> String {
+    let mut out = msg.to_string();
+    let mut resto = msg;
+    while let Some(i) = resto.find("(os error ") {
+        let depois = &resto[i + 10..];
+        let fim = depois.find(')').unwrap_or(0);
+        if let Ok(codigo) = depois[..fim].parse::<i32>()
+            && let Some(frase) = frase_os(codigo)
+        {
+            let original = std::io::Error::from_raw_os_error(codigo).to_string();
+            out = out.replace(&original, &format!("{frase} (os error {codigo})"));
+        }
+        resto = &depois[fim.min(depois.len())..];
+    }
+    out
+}
+
+// ------------------------------------------------------------------------------------------- //
+// Registro do atualizador (service/atualizador.log)
+// ------------------------------------------------------------------------------------------- //
+static LOG: OnceLock<PathBuf> = OnceLock::new();
+/// Tamanho do registro antes de virar atualizador.log.1 (só uma cópia antiga é guardada).
+const LOG_MAX: u64 = 1024 * 1024;
+
+/// Liga o registro próprio do atualizador. Sem isto, `log` não grava nada (testes, --check).
+pub fn definir_log(caminho: PathBuf) {
+    let _ = LOG.set(caminho);
+}
+
+fn carimbo() -> String {
+    #[cfg(windows)]
+    {
+        let mut t: windows_sys::Win32::Foundation::SYSTEMTIME = unsafe { std::mem::zeroed() };
+        unsafe { windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut t) };
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        let s = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        format!("unix {s}")
+    }
+}
+
+/// Uma linha no registro do atualizador: cada etapa e, numa falha, o erro original. Melhor
+/// esforço: um registro que não grava nunca impede a atualização.
+pub fn log(msg: impl AsRef<str>) {
+    let Some(caminho) = LOG.get() else { return };
+    if fs::metadata(caminho).is_ok_and(|m| m.len() > LOG_MAX) {
+        let _ = fs::rename(caminho, caminho.with_extension("log.1"));
+    }
+    let linha = format!(
+        "{} | pid {} | {}\r\n",
+        carimbo(),
+        std::process::id(),
+        msg.as_ref().replace(['\r', '\n'], " ")
+    );
+    if let Ok(mut f) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(caminho)
+    {
+        let _ = f.write_all(linha.as_bytes());
+    }
+}
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 pub const SERVICE: &str = "BaiacuNFSeUpdate";
@@ -290,6 +404,12 @@ pub fn install(
         .map_err(|_| "Pacote sem versão")?;
     list.remove(version_index);
     list.push(version_file);
+    log(format!(
+        "Instalação: {} arquivo(s) de {} para {}.",
+        list.len(),
+        source.display(),
+        target.display()
+    ));
     let mut existed = Vec::new();
     for rel in &list {
         let dst = target.join(rel);
@@ -343,18 +463,34 @@ pub fn install(
         for rel in binaries {
             apply(rel)?;
         }
+        log("Arquivos copiados e conferidos. Conferência de partida da nova versão (código 42)…");
         validate_startup()?;
+        log("Conferência de partida aprovada.");
         apply(version_file)?;
         durable_rename(
             &target.join("update.pending"),
             &target.join("update.committed"),
         )
     })();
-    if result.is_err() {
-        recover(target)?;
-    } else {
-        let _ = fs::remove_file(target.join("update.committed"));
-        let _ = fs::remove_dir_all(backup);
+    match &result {
+        Err(original) => {
+            log(format!("Falha na instalação: {original}. Voltando para a versão anterior…"));
+            // Se a volta também falhar, os DOIS erros seguem juntos: o original explica por
+            // que a instalação parou; o segundo, por que a versão anterior não voltou.
+            if let Err(volta) = recover(target) {
+                log(format!("A volta para a versão anterior também falhou: {volta}"));
+                return Err(format!(
+                    "{original}. A volta para a versão anterior também falhou: {volta}"
+                )
+                .into());
+            }
+            log("Versão anterior restaurada.");
+        }
+        Ok(()) => {
+            let _ = fs::remove_file(target.join("update.committed"));
+            let _ = fs::remove_dir_all(backup);
+            log("Instalação confirmada.");
+        }
     }
     result
 }
@@ -380,6 +516,10 @@ pub fn recover(target: &Path) -> Result<()> {
     }
     let backup = target.join("service/rollback");
     no_links(&backup)?;
+    log(format!(
+        "Recuperação: restaurando {} arquivo(s) da cópia em service/rollback.",
+        journal.files.len()
+    ));
     for rel in &journal.files {
         if rel.as_os_str().is_empty()
             || rel
@@ -405,7 +545,7 @@ pub fn recover(target: &Path) -> Result<()> {
     Ok(())
 }
 
-// A suíte local é copiada de NFSe/extras pelo roteiro rodar_testes_atualizador.py.
+// A suíte local é copiada de NFSe/temp/testes pelo roteiro rodar_testes_atualizador.py.
 // A compilação normal e os testes públicos não dependem de arquivos externos.
 #[cfg(all(test, feature = "testes-locais"))]
 #[path = "../testes_locais/regressao.rs"]

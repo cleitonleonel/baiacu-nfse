@@ -35,6 +35,8 @@ typedef _ChamarJaC =
     Pointer<Utf8> Function(Pointer<Utf8> metodo, Pointer<Utf8> args);
 typedef _LiberarC = Void Function(Pointer<Utf8> p);
 typedef _LiberarD = void Function(Pointer<Utf8> p);
+typedef _EncerrarC = Void Function();
+typedef _EncerrarD = void Function();
 
 class Nucleo {
   Nucleo._();
@@ -46,6 +48,7 @@ class Nucleo {
   static late final NativeCallable<_RetornoC> _retorno;
   static final CanalNucleo _canal = CanalNucleo();
   static int _proximo = 1;
+  static bool _encerrado = false;
 
   /// Carrega a biblioteca e diz ao núcleo onde ficam database/, logs/ e configs/.
   static void iniciar(String raiz) {
@@ -78,6 +81,20 @@ class Nucleo {
       _canal.responder(id, _ler(json));
     } catch (e, pilha) {
       _canal.falhar(id, e, pilha);
+    }
+  }
+
+  /// O programa vai fechar: o núcleo para de entregar respostas e o retorno é fechado. Sem
+  /// isso, uma tarefa que terminasse depois do fim da tela chamaria um `NativeCallable` morto.
+  /// Chamadas feitas depois disto nunca respondem. Pode ser chamado mais de uma vez.
+  static void encerrar() {
+    if (_encerrado) return;
+    _encerrado = true;
+    try {
+      _lib.lookupFunction<_EncerrarC, _EncerrarD>('nfse_encerrar')();
+      _retorno.close();
+    } catch (_) {
+      // Núcleo antigo ou não iniciado: nada a desligar.
     }
   }
 

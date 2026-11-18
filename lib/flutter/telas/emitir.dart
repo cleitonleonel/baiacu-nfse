@@ -24,6 +24,11 @@ import 'cliente_form.dart' show abrirCliente;
 /// Chave da opção "Todos"/"Todas" das listas de filtro.
 const todos = '*';
 const semGrupo = '(Sem grupo)';
+const rotuloPlataformaDigital =
+    'Operação de plataforma digital (art. 22 da LC 214/2025)';
+const dicaPlataformaDigital =
+    'Usa o prazo específico para exigir os campos de IBS/CBS em serviços '
+    'prestados ou intermediados por plataforma digital nas hipóteses legais.';
 
 // Enumerações oficiais (XSD v1.01) das listas de tributação — as mesmas do cadastro do
 // cliente e da expansão "Mais campos".
@@ -2884,13 +2889,14 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
               _secao('IBS/CBS'),
               Marcar(
                 valor: rtcPlataformaDigital,
-                rotulo:
-                    'Operação abrangida pelo art. 22 da LC 214/2025 (plataforma digital)',
+                rotulo: rotuloPlataformaDigital,
+                dica: dicaPlataformaDigital,
                 desabilitado: t,
                 aoMudar: (v) {
                   rtcPlataformaDigital = v ?? false;
                   _atualizar();
                 },
+                idLayout: 'Emitir.marcarOperacaoAbrangidaPeloArt',
               ),
               lin(
                 [
@@ -3087,23 +3093,17 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
                 quebra: true,
                 idLayout: 'Grupo.emitir.lin.13',
               ),
-              // A margem negativa alinha o quadradinho com a borda do campo IRRF.
-              PuxarEsquerda(
-                recuo: 10,
-                child: Marcar(
-                  idLayout: 'Checkbox.emitir.1',
-                  valor: cbContrib,
-                  rotulo: 'Incluir contribuições sociais (PIS + COFINS + CSLL)',
-                  estiloRotulo: _rotuloC,
-                  sobreposicao: Colors.transparent,
-                  raioRespingo: 0,
-                  desabilitado: t || naoRetido || semCalc,
-                  dica: _dicaContrib,
-                  aoMudar: (v) {
-                    cbContrib = v ?? false;
-                    _recalcular();
-                  },
-                ),
+              Marcar(
+                idLayout: 'Checkbox.emitir.1',
+                valor: cbContrib,
+                rotulo: 'Incluir contribuições sociais (PIS + COFINS + CSLL)',
+                estiloRotulo: _rotuloC,
+                desabilitado: t || naoRetido || semCalc,
+                dica: _dicaContrib,
+                aoMudar: (v) {
+                  cbContrib = v ?? false;
+                  _recalcular();
+                },
               ),
               lin(
                 [
@@ -3240,6 +3240,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
                 Icons.calendar_month_outlined,
                 aoClicar: _escolherCompetencia,
                 desabilitado: competenciaDesabilitada,
+                idLayout: 'Emitir.botaoIconeCalendarMonthOutlined',
               ),
               aoTocar: _escolherCompetencia,
               aoEnviar: (_) => _escolherCompetencia(),
@@ -3331,22 +3332,19 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
             ),
           // Só há o que escolher quando a nota tem desconto incondicionado.
           if (_temDescontoIncondicionado)
-            PuxarEsquerda(
-              recuo: 10,
-              child: Marcar(
-                idLayout: 'Checkbox.emitir.2',
-                valor: cbRetAbate,
-                rotulo:
-                    'Retenções (IRRF e CSLL/PIS/COFINS) calculadas sobre o valor já com o desconto incondicionado',
-                dica:
-                    'Marcado: a retenção sai do que vai ser pago (Lei 10.833/2003, art. 31), sem o desconto. '
-                    'Desmarque se o seu cliente retém sobre o valor cheio do serviço. '
-                    'O PIS/COFINS próprio sempre desconta: é o que a lei manda.',
-                aoMudar: (v) {
-                  cbRetAbate = v ?? true;
-                  _recalcular();
-                },
-              ),
+            Marcar(
+              idLayout: 'Checkbox.emitir.2',
+              valor: cbRetAbate,
+              rotulo:
+                  'Retenções (IRRF e CSLL/PIS/COFINS) calculadas sobre o valor já com o desconto incondicionado',
+              dica:
+                  'Marcado: a retenção sai do que vai ser pago (Lei 10.833/2003, art. 31), sem o desconto. '
+                  'Desmarque se o seu cliente retém sobre o valor cheio do serviço. '
+                  'O PIS/COFINS próprio sempre desconta: é o que a lei manda.',
+              aoMudar: (v) {
+                cbRetAbate = v ?? true;
+                _recalcular();
+              },
             ),
           // O cabeçalho da expansão é clicável e se pinta com o mouse em cima: a cor vem do
           // tema escopado, e o cartão transparente dá à expansão uma superfície por cima do
@@ -3513,6 +3511,7 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
                   icone: Icons.delete_outline,
                   desabilitado: _emitindo || _travaUi || app.ocupado,
                   aoClicar: _cancelarEmissao,
+                  idLayout: 'Emitir.botaoCancelarEmissao',
                 ),
               if (_tribAberto)
                 Botao.contorno(

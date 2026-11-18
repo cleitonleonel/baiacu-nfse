@@ -134,7 +134,8 @@ pub(crate) fn servico_registrado() -> bool {
 
 pub(crate) fn metodo_local(metodo: &str) -> bool {
     metodo.starts_with("texto.")
-        || metodo.starts_with("catalogo.")
+        // Baixar tabelas grava em logs/tabelas: só o serviço de dados pode.
+        || (metodo.starts_with("catalogo.") && metodo != "catalogo.atualizar_tabelas")
         || matches!(
             metodo,
             "nucleo.versao"
@@ -143,6 +144,8 @@ pub(crate) fn metodo_local(metodo: &str) -> bool {
                 | "pdf.aquecer_danfse"
                 | "cofre.limpar_temporarios"
                 | "ajuda.info"
+                | "registro.situacao"
+                | "registro.exportar_suporte"
                 | "emissao.aquecer"
                 | "usuarios.validar_senha"
                 | "usuarios.validar_credenciais_novas"
@@ -656,6 +659,8 @@ fn servico_main(_: Vec<OsString>) {
         }
         caminhos::definir_programa(programa.to_path_buf());
         caminhos::definir_raiz(dados);
+        registro::registrar_panicos();
+        registro::info("dados", "Serviço de dados iniciado.");
         atender_clientes(&parar, || {
             handle.set_service_status(status(ServiceState::Running, 0))
         })

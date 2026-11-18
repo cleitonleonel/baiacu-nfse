@@ -126,7 +126,7 @@ impl From<rusqlite::Error> for Erro {
 
 impl From<std::io::Error> for Erro {
     fn from(e: std::io::Error) -> Self {
-        Erro::os(e.to_string())
+        Erro::os(baiacu_atualizador::clarear_os(&e.to_string()))
     }
 }
 
@@ -140,4 +140,25 @@ impl From<serde_json::Error> for Erro {
 #[macro_export]
 macro_rules! valor {
     ($($arg:tt)*) => { $crate::erro::Erro::valor(format!($($arg)*)) };
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn erros_do_windows_em_portugues_claro() {
+        let e: Erro = std::io::Error::from_raw_os_error(5).into();
+        assert_eq!(e.msg, "Acesso negado (os error 5)");
+        let original = std::io::Error::from_raw_os_error(32).to_string();
+        let msg = format!("Falha ao gravar o backup: {original}");
+        assert_eq!(
+            baiacu_atualizador::clarear_os(&msg),
+            "Falha ao gravar o backup: O arquivo está em uso por outro programa (os error 32)"
+        );
+        // Código sem frase conhecida: a mensagem fica como está.
+        let raro = std::io::Error::from_raw_os_error(4390).to_string();
+        assert_eq!(baiacu_atualizador::clarear_os(&raro), raro);
+        assert_eq!(baiacu_atualizador::clarear_os("sem código"), "sem código");
+    }
 }

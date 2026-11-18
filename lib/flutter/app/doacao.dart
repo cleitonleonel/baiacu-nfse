@@ -278,10 +278,12 @@ class _JanelaDoacao {
               ],
             ),
           ),
-          IconButton(
-            tooltip: 'Fechar',
-            onPressed: app.fecharDialogo,
-            icon: const Icon(Icons.close, color: Colors.white),
+          BotaoIcone(
+            Icons.close,
+            dica: 'Fechar',
+            cor: Colors.white,
+            aoClicar: app.fecharDialogo,
+            idLayout: 'Doacao.botaoFecharTopo',
           ),
         ],
       ),
@@ -546,15 +548,14 @@ class _JanelaDoacao {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _violeta,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: () =>
+                    Botao(
+                      'Copiar',
+                      icone: Icons.copy,
+                      fundo: _violeta,
+                      cor: Colors.white,
+                      aoClicar: () =>
                           _copiar(endereco, 'Endereço ${c['simbolo']}'),
-                      icon: const Icon(Icons.copy, size: 16),
-                      label: const Text('Copiar'),
+                      idLayout: 'Doacao.botaoCopiarEndereco',
                     ),
                   ],
                 ),
@@ -586,13 +587,12 @@ class _JanelaDoacao {
 
   List<Widget> acoes(BuildContext context) => [
     const SizedBox.shrink(),
-    FilledButton(
-      style: FilledButton.styleFrom(
-        backgroundColor: _violeta,
-        foregroundColor: Colors.white,
-      ),
-      onPressed: app.fecharDialogo,
-      child: const Text('Fechar'),
+    Botao(
+      'Fechar',
+      fundo: _violeta,
+      cor: Colors.white,
+      aoClicar: app.fecharDialogo,
+      idLayout: 'Doacao.botaoFechar',
     ),
   ];
 }

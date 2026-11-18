@@ -77,9 +77,9 @@ abstract final class Medida {
 // =============================================================================
 // TAMANHOS — larguras e alturas dos campos/labels, rótulos e botões, por área.
 // =============================================================================
-// Em desenvolvimento: abra extras/desenvolver.bat, edite aqui e salve. O hot reload
+// Em desenvolvimento: abra compilacao/desenvolver.bat, edite aqui e salve. O hot reload
 // aplica automaticamente sem fechar a tela ou sair do usuário.
-// Para distribuir o resultado final, use extras/compilar_exe.bat.
+// Para distribuir o resultado final, use compilacao/compilar_exe.bat.
 // Exemplo: TamanhosEmitir.botaoEmitirNFSE = Tamanho(largura: 180, altura: 44).
 // null mantém o tamanho automático original do Flutter (ou o cálculo responsivo
 // da tela). Nos campos/listas com largura numérica, mantenha uma largura positiva.
@@ -101,6 +101,13 @@ class Tamanho {
 
 /// Clientes - listagem e pesquisa.
 abstract final class TamanhosClientes {
+  /// Importar/exportar clientes
+  static const botaoImportarExportar = Tamanho(
+    largura: null,
+    altura: null,
+    id: 'TamanhosClientes.botaoImportarExportar',
+  );
+
   /// rotulo
   static const rotuloRotulo = Tamanho(
     largura: null,
@@ -1069,6 +1076,27 @@ abstract final class TamanhosCofre {
 
 /// Configurações.
 abstract final class TamanhosConfiguracoes {
+
+  /// Exportar logs para o suporte (Avançado › Logs)
+  static const botaoExportarLogs = Tamanho(
+    largura: null,
+    altura: null,
+    id: 'TamanhosConfiguracoes.botaoExportarLogs',
+  );
+
+  /// Abrir a pasta dos logs
+  static const botaoAbrirPastaLogs = Tamanho(
+    largura: null,
+    altura: null,
+    id: 'TamanhosConfiguracoes.botaoAbrirPastaLogs',
+  );
+
+  /// Atualizar tabelas tributárias (Avançado › Emissão)
+  static const botaoAtualizarTabelas = Tamanho(
+    largura: null,
+    altura: null,
+    id: 'TamanhosConfiguracoes.botaoAtualizarTabelas',
+  );
 
   /// Procurar versão nova sozinho
   static const marcarAtualizacaoAutomatica = Tamanho(

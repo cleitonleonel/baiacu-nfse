@@ -6,7 +6,7 @@
 //! rede ou o scrypt. Quem recebe o texto o devolve com `nfse_liberar`.
 //! `nfse_chamar_ja` é a versão que responde na hora, para o que é só memória.
 use std::ffi::{CStr, CString, c_char};
-use std::sync::OnceLock;
+use std::sync::RwLock;
 
 use serde_json::{Value, json};
 
@@ -14,7 +14,18 @@ use crate::{caminhos, despacho};
 
 type Retorno = extern "C" fn(id: i64, json: *mut c_char);
 
-static RETORNO: OnceLock<Retorno> = OnceLock::new();
+/// A função de retorno do Dart. Vira `None` em `nfse_encerrar`: depois que a tela fecha, chamar o
+/// `NativeCallable.listener` é comportamento indefinido (derrubava o programa ao sair, c000041d).
+/// Quem responde segura a leitura só enquanto entrega a resposta; o encerramento espera por ele.
+static RETORNO: RwLock<Option<Retorno>> = RwLock::new(None);
+
+/// Entrega `v` à tela, se ela ainda estiver ouvindo. Sem ouvinte, nada é alocado.
+fn devolver(id: i64, v: &Value) {
+    let guarda = RETORNO.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(retorno) = *guarda {
+        retorno(id, para_c(v));
+    }
+}
 
 unsafe fn texto(p: *const c_char) -> String {
     if p.is_null() {
@@ -43,7 +54,7 @@ fn responder(metodo: &str, args: &str, avisar: despacho::Avisar) -> Value {
         }
     };
     // Um erro de programação numa chamada não pode derrubar o programa inteiro.
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let mut v = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         #[cfg(windows)]
         if crate::dados_windows::cliente_instalado() && !crate::dados_windows::metodo_local(metodo) {
             if matches!(metodo, "atualizacao.baixar" | "atualizacao.instalar") {
@@ -68,10 +79,18 @@ fn responder(metodo: &str, args: &str, avisar: despacho::Avisar) -> Value {
                 .cloned()
                 .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
                 .unwrap_or_else(|| "erro interno".into());
-            eprintln!("Falha interna em {metodo}: {msg}");
+            crate::registro::critico("nucleo", &format!("Falha interna em {metodo}: {msg}"));
             json!({ "erro": { "tipo": "RuntimeError", "msg": format!("Falha interna: {msg}") } })
         }
+    };
+    // "Acesso negado. (os error 5)" e afins chegam à tela em português claro.
+    if let Some(msg) = v.pointer_mut("/erro/msg")
+        && let Some(texto) = msg.as_str()
+        && texto.contains("(os error ")
+    {
+        *msg = Value::String(baiacu_atualizador::clarear_os(texto));
     }
+    v
 }
 
 /// Uma vez, ao abrir: a pasta raiz (database/, logs/, configs/) e a função de retorno do Dart.
@@ -86,7 +105,17 @@ pub unsafe extern "C" fn nfse_iniciar(raiz: *const c_char, retorno: Retorno) {
     if !raiz.is_empty() {
         caminhos::definir_raiz(raiz);
     }
-    let _ = RETORNO.set(retorno);
+    crate::registro::registrar_panicos();
+    *RETORNO.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(retorno);
+}
+
+/// A tela vai fechar: nenhuma resposta é mais entregue. Volta só depois que quem estava
+/// entregando uma resposta terminou — então o Dart pode fechar o `NativeCallable` com segurança.
+/// O trabalho que ainda corre continua (e termina com o processo); só a resposta é descartada.
+#[unsafe(no_mangle)]
+pub extern "C" fn nfse_encerrar() {
+    *RETORNO.write().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    crate::registro::info("app", "Tela encerrada: respostas do núcleo desligadas.");
 }
 
 /// Chamada assíncrona: a resposta chega por `retorno(id, json)`.
@@ -100,29 +129,19 @@ pub unsafe extern "C" fn nfse_chamar(id: i64, metodo: *const c_char, args: *cons
     let (metodo, args) = unsafe { (texto(metodo), texto(args)) };
     let trabalho = move || {
         // andamento: chega pelo mesmo retorno, como {"aviso": ...}, antes da resposta final
-        let avisar = |v: &Value| {
-            if let Some(retorno) = RETORNO.get() {
-                retorno(id, para_c(&json!({ "aviso": v })));
-            }
-        };
+        let avisar = |v: &Value| devolver(id, &json!({ "aviso": v }));
         let resposta = responder(&metodo, &args, &avisar);
-        if let Some(retorno) = RETORNO.get() {
-            retorno(id, para_c(&resposta));
-        }
+        devolver(id, &resposta);
     };
     if std::thread::Builder::new()
         .name("nucleo".into())
         .spawn(trabalho)
         .is_err()
     {
-        if let Some(retorno) = RETORNO.get() {
-            retorno(
-                id,
-                para_c(
-                    &json!({ "erro": { "tipo": "OSError", "msg": "não foi possível iniciar a tarefa" } }),
-                ),
-            );
-        }
+        devolver(
+            id,
+            &json!({ "erro": { "tipo": "OSError", "msg": "não foi possível iniciar a tarefa" } }),
+        );
     }
 }
 

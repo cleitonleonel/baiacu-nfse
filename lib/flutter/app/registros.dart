@@ -311,6 +311,7 @@ void abrirHistoricoRegistros(App app) {
               ),
               Marcar(
                 idLayout: 'Checkbox.registros.1',
+                rente: false, // vem depois dos campos de busca
                 valor: soErros,
                 rotulo: 'Só erros e avisos',
                 aoMudar: (v) {

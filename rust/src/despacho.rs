@@ -158,6 +158,16 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
             registro::sincronizar();
             Ok(Value::Null)
         }
+        "registro.situacao" => Ok(registro::situacao()),
+        "registro.configurar" => registro::configurar(
+            a.get("max_mb").and_then(Value::as_u64).unwrap_or(0),
+            a.get("dias").and_then(Value::as_u64).unwrap_or(0) as u32,
+            a.get("mascarar").and_then(Value::as_bool).unwrap_or(true),
+        ),
+        "registro.exportar_suporte" => registro::exportar_suporte(
+            Path::new(texto(a, "destino")?),
+            a.get("dias").and_then(Value::as_u64).unwrap_or(30) as u32,
+        ),
         "registro.definir_usuario" => {
             registro::definir_usuario(
                 a.get("operador_id").and_then(Value::as_i64),

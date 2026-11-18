@@ -90,6 +90,7 @@ class _Previa {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _faixaDeEstado(esquema),
+            ..._avisosTributacao(),
             if (destaques.isNotEmpty) ...[
               const SizedBox(height: 14),
               _destaques(esquema, destaques),
@@ -103,6 +104,50 @@ class _Previa {
         ),
       ),
     );
+  }
+
+  /// Combinações de NBS, item, cIndOp e cClassTrib que o Anexo VIII da NFS-e não prevê. Não
+  /// impedem a transmissão (a tabela oficial ainda é preliminar), mas costumam virar recusa.
+  List<Widget> _avisosTributacao() {
+    final avisos = [
+      for (final a in (pv['avisos_tributacao'] as List?) ?? const []) '$a',
+    ];
+    if (avisos.isEmpty) return const [];
+    final cor = Colors.orange.shade800;
+    return [
+      const SizedBox(height: 12),
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: cor.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: cor.withValues(alpha: 0.5)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: cor, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Compatibilidade tributária (IBS/CBS): confira antes de transmitir',
+                    style: TextStyle(color: cor, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            for (final a in avisos)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('• $a'),
+              ),
+          ],
+        ),
+      ),
+    ];
   }
 
   /// Nº/série, ambiente, validação do XSD e quem assina, em etiquetas.

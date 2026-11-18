@@ -21,6 +21,7 @@ strip = true
 baiacu-atualizador = { path = "atualizador" }
 aes-gcm = "0.11.1"
 base64 = "0.23.1"
+calamine = { version = "0.38.0", default-features = false, features = ["chrono"] }
 chrono = "0.4.45"
 flate2 = { version = "1.1.10", features = ["zlib-rs"] }
 getrandom = "0.4.3"

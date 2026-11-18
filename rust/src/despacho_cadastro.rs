@@ -73,7 +73,22 @@ pub fn executar(metodo: &str, a: &Value) -> Option<Res<Value>> {
             Ok(Value::Null)
         }
         "catalogo.indop_options" => Ok(pares(catalogo::indop_options())),
-        "catalogo.cst_options" => Ok(pares(catalogo::cst_options())),
+        "catalogo.cst_options" => Ok(pares(&catalogo::cst_options())),
+        "catalogo.compatibilidade" => Ok(catalogo::compatibilidade(
+            texto(a, "nbs").unwrap_or(""),
+            texto(a, "trib_nac").unwrap_or(""),
+        )),
+        "catalogo.avisos_correlacao" => js(catalogo::avisos_correlacao(
+            texto(a, "trib_nac").unwrap_or(""),
+            texto(a, "nbs").unwrap_or(""),
+            texto(a, "indop").unwrap_or(""),
+            texto(a, "cclasstrib").unwrap_or(""),
+        )),
+        "catalogo.situacao_tabelas" => Ok(catalogo::situacao_tabelas()),
+        "catalogo.recarregar" => {
+            catalogo::recarregar();
+            Ok(Value::Null)
+        }
         "catalogo.class_options" => texto(a, "cst").map(|c| pares(&catalogo::class_options(c))),
         "catalogo.tribnac_options" => Ok(pares(catalogo::tribnac_options())),
         "catalogo.nbs_options" => Ok(pares(catalogo::nbs_options())),
@@ -206,6 +221,33 @@ pub fn executar(metodo: &str, a: &Value) -> Option<Res<Value>> {
 
         // ---- clientes ----------------------------------------------------------------- //
         "cadastro.list_tomadores" => (|| js(cadastro::list_tomadores(texto(a, "prestador")?)?))(),
+        // ---- clientes por planilha ---------------------------------------------------- //
+        "clientes.modelo_planilha" => (|| {
+            crate::clientes_planilha::modelo(std::path::Path::new(texto(a, "destino")?))
+        })(),
+        "clientes.exportar_planilha" => (|| {
+            crate::clientes_planilha::exportar(
+                texto(a, "prestador")?,
+                std::path::Path::new(texto(a, "destino")?),
+            )
+        })(),
+        "clientes.previa_importacao" => (|| {
+            crate::clientes_planilha::previa(
+                texto(a, "prestador")?,
+                std::path::Path::new(texto(a, "origem")?),
+            )
+        })(),
+        "clientes.importar_planilha" => (|| {
+            let atualizar = a.get("atualizar").and_then(Value::as_bool).unwrap_or(false);
+            if atualizar {
+                crate::permissoes::exigir("clientes.editar")?;
+            }
+            crate::clientes_planilha::importar(
+                texto(a, "prestador")?,
+                std::path::Path::new(texto(a, "origem")?),
+                atualizar,
+            )
+        })(),
         "cadastro.delete_tomador" => (|| {
             cadastro::delete_tomador(texto(a, "prestador")?, texto(a, "tomador")?)?;
             Ok(Value::Null)

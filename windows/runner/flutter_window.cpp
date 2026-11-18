@@ -27,7 +27,10 @@ NOTIFYICONDATAW DadosDoIcone(HWND janela) {
 FlutterWindow::FlutterWindow(const flutter::DartProject& project, bool oculta, StartupGuard* starting)
     : project_(project), oculta_(oculta), starting_(starting) {}
 
-FlutterWindow::~FlutterWindow() {}
+FlutterWindow::~FlutterWindow() {
+  // Normalmente o wWinMain já chamou Destroy(). Aqui é só a garantia: o motor sai antes da janela.
+  if (flutter_controller_) OnDestroy();
+}
 
 bool FlutterWindow::OnCreate() {
   if (!Win32Window::OnCreate()) {
@@ -53,6 +56,20 @@ bool FlutterWindow::OnCreate() {
       flutter_controller_->engine()->messenger(), "baiacu/janela",
       &flutter::StandardMethodCodec::GetInstance());
   janela_->SetMethodCallHandler([this](const auto& chamada, auto resposta) {
+    if (chamada.method_name() == "encerrar") {
+      // A saída já foi confirmada e arrumada pelo Dart. O motor do Flutter NÃO pode ser
+      // destruído aqui dentro (estamos numa resposta dele) nem dentro do WM_DESTROY de um
+      // DestroyWindow: isso derrubava o programa com c000041d. A janela some na hora e o laço
+      // de mensagens termina; o wWinMain desmonta o motor com calma, fora de qualquer callback.
+      const HWND janela = GetHandle();
+      if (janela != nullptr) {
+        RemoverIcone(janela);
+        ::ShowWindow(janela, SW_HIDE);
+      }
+      resposta->Success(flutter::EncodableValue(true));
+      ::PostQuitMessage(0);
+      return;
+    }
     if (chamada.method_name() != "ocultarNaBandeja") {
       resposta->NotImplemented();
       return;
@@ -139,11 +156,12 @@ void FlutterWindow::MostrarMenuDaBandeja(HWND window) {
   POINT posicao{};
   ::GetCursorPos(&posicao);
   ::SetForegroundWindow(window);
-  // Encosta a borda inferior do menu no cursor: abre acima do clique.
-  // WORKAREA mantém o menu na área útil do monitor, fora da barra de tarefas.
+  // Encosta a borda inferior do menu no cursor: abre logo acima do clique, como os menus de
+  // bandeja do próprio Windows. Sem TPM_WORKAREA: ela empurrava o menu para cima da barra de
+  // tarefas e o "Sair" ficava longe do ícone. O Windows ainda o mantém dentro do monitor.
   const UINT acao = ::TrackPopupMenuEx(
       menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON |
-                TPM_RIGHTALIGN | TPM_BOTTOMALIGN | TPM_WORKAREA,
+                TPM_RIGHTALIGN | TPM_BOTTOMALIGN,
       posicao.x, posicao.y, window, nullptr);
   ::DestroyMenu(menu);
   ::PostMessageW(window, WM_NULL, 0, 0);

@@ -36,6 +36,21 @@ const corSenhaNivel = <int, Color>{
 
 Color corDoNivel(int nivel) => corSenhaNivel[nivel] ?? Colors.indigo.shade700;
 
+/// Termina o processo depois de a saída ter sido confirmada e arrumada: o núcleo para de
+/// responder, a janela some na hora e o runner desmonta o motor do Flutter fora de qualquer
+/// callback do Windows (antes, sair travava alguns segundos e terminava com c000041d).
+Future<void> encerrarProcesso() async {
+  Nucleo.encerrar();
+  try {
+    if (await const MethodChannel('baiacu/janela').invokeMethod<bool>('encerrar') == true) {
+      return;
+    }
+  } catch (_) {
+    // Runner sem "encerrar" (modo de teste): sai direto.
+  }
+  exit(0);
+}
+
 // --------------------------------------------------------------------------- //
 // Núcleo: atalhos
 // --------------------------------------------------------------------------- //
@@ -125,10 +140,11 @@ class AcessoRestrito extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-    child: OutlinedButton.icon(
-      onPressed: aoAutorizar,
-      icon: const Icon(Icons.lock_outline),
-      label: const Text('Autorizar acesso'),
+    child: Botao.contorno(
+      'Autorizar acesso',
+      icone: Icons.lock_outline,
+      aoClicar: aoAutorizar,
+      idLayout: 'AcessoRestrito.botaoAutorizar',
     ),
   );
 }
@@ -1042,7 +1058,8 @@ class App {
         );
       }
     }
-    exit(0);
+    await encerrarProcesso();
+    return true;
   }
 
   bool _fechando = false;

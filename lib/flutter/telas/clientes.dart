@@ -11,6 +11,7 @@ import '../kit/formatos.dart';
 import '../kit/tabela.dart';
 import '../editor_layout.dart';
 import 'cliente_form.dart';
+import 'clientes_planilha.dart';
 import 'emitir.dart' show semGrupo, todos;
 import 'grupos.dart';
 
@@ -398,6 +399,15 @@ class ClientesState extends State<TelaClientes>
               desabilitado: app.prestador.isEmpty,
               aoClicar: () => abrirCliente(app, null),
               idLayout: 'TamanhosClientes.botaoAdicionarCliente',
+            ),
+            BotaoIcone(
+              Icons.import_export,
+              dica: 'Importar/exportar clientes',
+              largura: TamanhosClientes.botaoImportarExportar.largura,
+              altura: TamanhosClientes.botaoImportarExportar.altura,
+              desabilitado: app.prestador.isEmpty,
+              aoClicar: () => abrirImportarExportarClientes(app, recarregar),
+              idLayout: 'TamanhosClientes.botaoImportarExportar',
             ),
             BotaoIcone(
               Icons.groups,

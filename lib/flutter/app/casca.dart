@@ -55,11 +55,16 @@ class _CascaState extends State<Casca> {
     // municípios) precisam ter pronto é preparado de antemão, aos poucos.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      // Versão nova: no máximo uma consulta por dia, sem nunca atrapalhar a entrada.
-      app.agendar(
-        const Duration(seconds: 8),
-        () => procurarAtualizacao(app, automatica: true),
-      );
+      // Versão nova: 5 s depois do login e, com o programa aberto, de tempos em tempos. O
+      // núcleo só vai ao GitHub quando é hora pela frequência escolhida (ao abrir o programa,
+      // 1 h, 6 h ou 1 dia); "ao abrir o programa" procura só na entrada.
+      void procurar({bool aoEntrar = false}) {
+        procurarAtualizacao(app, automatica: true, aoEntrar: aoEntrar);
+        app.agendar(const Duration(minutes: 15), procurar);
+      }
+
+      app.agendar(const Duration(seconds: 5), () => procurar(aoEntrar: true));
+      app.agendar(const Duration(seconds: 12), () => avisarModoAntigo(app));
       if (app.semPrestador) return;
       app.atualizarLotesPendentes();
       chamar<Object?>('pdf.aquecer_danfse').catchError((Object _) => null);
@@ -159,6 +164,7 @@ class _CascaState extends State<Casca> {
                   'Liberar prestadores',
                   icone: Icons.add_link,
                   aoClicar: () => gerirPrestadores(app, app.usuario),
+                  idLayout: 'Casca.botaoLiberarPrestadores',
                 ),
             ],
             cruzado: CrossAxisAlignment.center,

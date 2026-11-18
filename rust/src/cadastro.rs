@@ -776,7 +776,7 @@ fn ordem_contatos(desejada: &[String], mut telefones: usize, mut emails: usize) 
 }
 
 impl TomadorForm {
-    fn contatos_para_gravar(&self) -> Vec<ContatoTomador> {
+    pub(crate) fn contatos_para_gravar(&self) -> Vec<ContatoTomador> {
         if let Some(contatos) = &self.contatos {
             let mut saida: Vec<_> = contatos
                 .iter()
@@ -1479,7 +1479,7 @@ impl ServicoForm {
             .any(|v| !aparar(v).is_empty())
     }
 
-    fn tem_rtc(&self) -> bool {
+    pub fn tem_rtc(&self) -> bool {
         [
             &self.rtc_indDest,
             &self.rtc_cIndOp,

@@ -1,16 +1,16 @@
 import 'dart:io';
-import 'dart:ui' show AppExitResponse, AppExitType;
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
-import 'package:flutter/services.dart' show MethodChannel, ServicesBinding;
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'acesso/acesso.dart';
 import 'app/app.dart';
 import 'app/casca.dart';
 import 'escala.dart';
-import 'estilo.dart';
+import 'kit/flet.dart';
 import 'editor_layout.dart';
 import 'tema.dart';
 
@@ -74,6 +74,26 @@ void main(List<String> args) {
     'nome': 'app',
     'msg': 'Aplicativo iniciado.',
   });
+  // Erros não tratados da tela vão para o log em disco (antes, só para o console).
+  void registrarErro(String origem, Object erro, StackTrace? pilha) {
+    try {
+      Nucleo.chamar<Object?>('registro.registrar', {
+        'nome': 'app',
+        'nivel': 'error',
+        'msg': 'Erro não tratado ($origem): $erro${pilha == null ? '' : '\n$pilha'}',
+      }).catchError((_) => null);
+    } catch (_) {}
+  }
+
+  final tratadorPadrao = FlutterError.onError;
+  FlutterError.onError = (detalhes) {
+    registrarErro('tela', detalhes.exception, detalhes.stack);
+    tratadorPadrao?.call(detalhes);
+  };
+  WidgetsBinding.instance.platformDispatcher.onError = (erro, pilha) {
+    registrarErro('assíncrono', erro, pilha);
+    return true;
+  };
   runApp(const RepaintBoundary(child: EmissorApp()));
 }
 
@@ -113,15 +133,21 @@ class _EmissorAppState extends State<EmissorApp> with WidgetsBindingObserver {
           const Duration(seconds: 2),
           onTimeout: () {},
         );
-        await ServicesBinding.instance.exitApplication(AppExitType.required);
+        await _encerrar();
         return;
       }
       if (chamada.method == 'sairDaBandeja' &&
           await _pedirSaida(daBandeja: true) == AppExitResponse.exit) {
-        await ServicesBinding.instance.exitApplication(AppExitType.required);
+        await _encerrar();
       }
     });
   }
+
+  /// Fecha o processo depois da saída confirmada e arrumada. O núcleo para de responder e o
+  /// runner esconde a janela e termina o laço de mensagens; o motor do Flutter é desmontado fora
+  /// de qualquer callback. Devolver "exit" ao pedido de saída fazia o Flutter se destruir dentro
+  /// da própria resposta (travava alguns segundos e terminava com c000041d).
+  Future<void> _encerrar() => encerrarProcesso();
 
   @override
   void dispose() {
@@ -131,7 +157,14 @@ class _EmissorAppState extends State<EmissorApp> with WidgetsBindingObserver {
   }
 
   @override
-  Future<AppExitResponse> didRequestAppExit() => _pedirSaida();
+  Future<AppExitResponse> didRequestAppExit() async {
+    if (await _pedirSaida() != AppExitResponse.exit) {
+      return AppExitResponse.cancel;
+    }
+    // A resposta ao Flutter é "cancelar": quem fecha é o runner, depois de a resposta voltar.
+    Future(_encerrar);
+    return AppExitResponse.cancel;
+  }
 
   bool _saidaBloqueada() {
     final app = _app;
@@ -161,6 +194,8 @@ class _EmissorAppState extends State<EmissorApp> with WidgetsBindingObserver {
       final confirmou = await showDialog<bool>(
         context: contexto,
         barrierDismissible: false,
+        // kit: exceção — a saída também acontece na tela de acesso, antes de existir o App
+        // (e o Dialogo do kit precisa dele); a janela usa o AlertDialog do tema.
         builder: (context) => AlertDialog(
           title: const Text('Sair do Baiacu NFS-e?'),
           content: const SizedBox(
@@ -168,14 +203,16 @@ class _EmissorAppState extends State<EmissorApp> with WidgetsBindingObserver {
             child: Text('Deseja realmente sair do programa?'),
           ),
           actions: [
-            TextButton(
-              autofocus: true,
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar'),
+            Botao.texto(
+              'Cancelar',
+              focoInicial: true,
+              aoClicar: () => Navigator.pop(context, false),
+              idLayout: 'Sair.botaoCancelar',
             ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Sair'),
+            Botao(
+              'Sair',
+              aoClicar: () => Navigator.pop(context, true),
+              idLayout: 'Sair.botaoSair',
             ),
           ],
         ),

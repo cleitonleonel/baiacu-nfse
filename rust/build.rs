@@ -8,7 +8,7 @@ fn main() {
     let aqui = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
     let libs = std::env::var_os("BAIACU_NATIVE_LIBS")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::Path::new(&aqui).join("../../extras/terceiros"));
+        .unwrap_or_else(|| std::path::Path::new(&aqui).join("../../compilacao/terceiros"));
     let libxml2 = libs.join("libxml2");
     println!(
         "cargo:rerun-if-changed={}",
