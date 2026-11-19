@@ -334,7 +334,20 @@ enum Msg {
 }
 
 static FILA: OnceLock<SyncSender<Msg>> = OnceLock::new();
-static CARIMBO: RwLock<String> = RwLock::new(String::new());
+thread_local! {
+    static OPERADOR: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
+pub(crate) fn com_operador<T>(id: Option<i64>, acao: impl FnOnce() -> T) -> T {
+    struct Restaurar(Option<i64>);
+    impl Drop for Restaurar {
+        fn drop(&mut self) {
+            OPERADOR.set(self.0);
+        }
+    }
+    let _restaurar = Restaurar(OPERADOR.replace(id));
+    acao()
+}
 static INICIO: Mutex<()> = Mutex::new(());
 
 struct Gravador {
@@ -470,12 +483,13 @@ fn formatar(nome: &str, nivel: Nivel, msg: &str) -> String {
     } else {
         msg.to_string()
     };
+    let operador = OPERADOR.get().map_or_else(String::new, |id| format!(" [op#{id}]"));
     format!(
         "{} | {:<7} | {:<14} |{} {}",
         Local::now().format("%Y-%m-%d %H:%M:%S"),
         nivel.nome(),
         nome,
-        CARIMBO.read().unwrap_or_else(std::sync::PoisonError::into_inner),
+        operador,
         msg
     )
 }
@@ -552,24 +566,6 @@ pub fn sincronizar() {
     }
 }
 
-/// Define o usuário carimbado nas linhas (a tela chama no login e nas autorizações).
-pub fn definir_usuario(operador_id: Option<i64>, autorizador_id: Option<i64>) {
-    let mut partes: Vec<String> = Vec::new();
-    if let Some(op) = operador_id.filter(|v| *v != 0) {
-        partes.push(format!("op#{op}"));
-    }
-    if let Some(aut) = autorizador_id.filter(|v| *v != 0) {
-        if Some(aut) != operador_id {
-            partes.push(format!("aut#{aut}"));
-        }
-    }
-    *CARIMBO.write().unwrap_or_else(std::sync::PoisonError::into_inner) = if partes.is_empty() {
-        String::new()
-    } else {
-        format!(" [{}]", partes.join(" "))
-    };
-}
-
 // ------------------------------------------------------------------------------------------- //
 // Exportação para o suporte
 // ------------------------------------------------------------------------------------------- //
@@ -583,7 +579,7 @@ const ARQUIVOS_ATUALIZADOR: [&str; 4] = [
 
 /// Gera um .zip com os logs dos últimos `dias` (todos se 0), o log do atualizador e um resumo
 /// do sistema, para mandar ao suporte. CPF, CNPJ e e-mail saem SEMPRE mascarados. Roda no
-/// processo da tela: a pasta de logs é legível pelo usuário e o destino é dele.
+/// serviço e cria o arquivo de destino com a identidade de quem solicitou.
 pub fn exportar_suporte(destino: &Path, dias: u32) -> Res<Value> {
     use zip::write::SimpleFileOptions;
     sincronizar();
@@ -600,7 +596,7 @@ pub fn exportar_suporte(destino: &Path, dias: u32) -> Res<Value> {
     arquivos.sort_by(|a, b| a.caminho.cmp(&b.caminho));
 
     let tmp = destino.with_extension("zip.tmp");
-    let mut zip = zip::ZipWriter::new(File::create(&tmp)?);
+    let mut zip = zip::ZipWriter::new(caminhos::arquivo_usuario(|| File::create(&tmp))?);
     let opcoes = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let mut incluir = |nome: &str, bytes: &[u8]| -> Res<()> {
         zip.start_file(nome, opcoes)
@@ -631,8 +627,8 @@ pub fn exportar_suporte(destino: &Path, dias: u32) -> Res<Value> {
     incluir("sistema.txt", resumo_sistema().as_bytes())?;
     zip.finish()
         .map_err(|e| Erro::os(format!("Não foi possível concluir o .zip: {e}")))?;
-    fs::rename(&tmp, destino)?;
-    let tamanho = fs::metadata(destino).map(|m| m.len()).unwrap_or(0);
+    caminhos::arquivo_usuario(|| fs::rename(&tmp, destino))?;
+    let tamanho = caminhos::arquivo_usuario(|| fs::metadata(destino)).map(|m| m.len()).unwrap_or(0);
     info(
         "registro",
         &format!("Logs exportados para o suporte: {incluidos} arquivo(s)."),

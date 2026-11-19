@@ -88,6 +88,9 @@ fn criar_faixas(inicio: NaiveDate, fim: NaiveDate, dias: u64) -> Res<(&'static s
     Ok((grupo, faixas))
 }
 
+/// Quantas notas com XML ilegível o resumo aponta de uma vez (a busca vai uma a uma na SEFIN).
+const XML_ILEGIVEIS_MAX: usize = 200;
+
 fn ler_retencoes(xml: &[u8]) -> Option<i64> {
     let doc = roxmltree::Document::parse(std::str::from_utf8(xml).ok()?).ok()?;
     let inf = doc
@@ -108,6 +111,7 @@ pub(crate) fn resumo(
     ini: &str,
     fim: &str,
     competencia: bool,
+    movimento: bool,
     anteriores: &[[String; 2]],
 ) -> Res<Value> {
     let (inicio, fim) = (data(ini)?, data(fim)?);
@@ -133,7 +137,7 @@ pub(crate) fn resumo(
         }
         periodos.push((de.to_string(), ate.to_string()));
     }
-    let passo = if dias == 1 && !competencia {
+    let passo = if dias == 1 && (!competencia || movimento) {
         "hora"
     } else if dias > 1830 {
         "mes"
@@ -146,6 +150,8 @@ pub(crate) fn resumo(
     let mut anterior = Valores::default();
     let mut retencoes = 0;
     let mut xml_indisponiveis = 0;
+    // As notas cujo XML guardado não abre (ou sumiu): a tela oferece buscar de novo na SEFIN.
+    let mut xml_ilegiveis: Vec<i64> = Vec::new();
     let mut clientes = HashMap::new();
     let dono = cofre::so_doc(dono);
     if dono.is_empty() {
@@ -155,8 +161,9 @@ pub(crate) fn resumo(
         // Uma leitura ordenada garante o mesmo conjunto de notas para os totais e os gráficos.
         let mut con = cofre::conn()?;
         let con = con.transaction()?;
-        let coluna = if competencia { "dCompet" } else { "dt" };
+        let coluna = cofre::coluna_de_data(competencia, movimento);
         let chave = match passo {
+            "hora" if movimento => "COALESCE(strftime('%H', NULLIF(entrou, 0), 'unixepoch', 'localtime'), '')".to_string(),
             "hora" => "CASE WHEN substr(dhProc, 12, 2) GLOB '[0-2][0-9]'
                          AND substr(dhProc, 12, 2) < '24' THEN substr(dhProc, 12, 2)
                          ELSE '' END"
@@ -215,11 +222,20 @@ pub(crate) fn resumo(
                 }
                 c.valores.somar(bruto, liquido);
             }
-            match cofre::xml_disponivel_em(&con, nota.get(0)?)
-                .ok()
-                .flatten()
-                .and_then(|xml| ler_retencoes(&xml))
-            {
+            let id: i64 = nota.get(0)?;
+            let xml = match cofre::xml_disponivel_em(&con, id) {
+                Ok(Some(xml)) => Some(xml),
+                Ok(None) => None,
+                Err(e) if cofre::e_xml_ilegivel(&e) => None,
+                Err(_) => {
+                    xml_indisponiveis += 1;
+                    continue;
+                }
+            };
+            if xml.is_none() && xml_ilegiveis.len() < XML_ILEGIVEIS_MAX {
+                xml_ilegiveis.push(id);
+            }
+            match xml.and_then(|xml| ler_retencoes(&xml)) {
                 Some(valor) => retencoes += valor,
                 None => xml_indisponiveis += 1,
             }
@@ -268,7 +284,7 @@ pub(crate) fn resumo(
     Ok(json!({
         "total": total, "anterior": anterior, "grupo": grupo, "faixas": faixas,
         "anterior_ini": anterior_ini, "anterior_fim": anterior_fim,
-        "retencoes": retencoes, "xml_indisponiveis": xml_indisponiveis,
+        "retencoes": retencoes, "xml_indisponiveis": xml_indisponiveis, "xml_ilegiveis": xml_ilegiveis,
         "clientes": clientes.len(), "ranking_bruto": ordenar(false), "ranking_liquido": ordenar(true),
         "passo": passo,
         "series": std::iter::once(pontos.into_iter().map(|(chave, v)|

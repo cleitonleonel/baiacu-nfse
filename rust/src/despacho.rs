@@ -18,7 +18,9 @@ pub type Avisar<'a> = &'a dyn Fn(&Value);
 
 /// Chama e embrulha o resultado/erro no envelope; as chamadas demoradas avisam do andamento.
 pub fn chamar_avisando(metodo: &str, args: &Value, avisar: Avisar) -> Value {
-    envelope(com_acesso(metodo, || executar(metodo, args, avisar)))
+    envelope(com_acesso(metodo, || {
+        registro::com_operador(crate::permissoes::operador_id(), || executar(metodo, args, avisar))
+    }))
 }
 
 #[cfg(windows)]
@@ -32,7 +34,7 @@ pub(crate) fn chamar_servico(
 ) -> Value {
     envelope(com_acesso(metodo, || {
         autorizar()?;
-        executar(metodo, args, avisar)
+        registro::com_operador(crate::permissoes::operador_id(), || executar(metodo, args, avisar))
     }))
 }
 
@@ -76,28 +78,30 @@ pub(crate) fn envelope(resultado: Res<Value>) -> Value {
 // ---- cancelamento ------------------------------------------------------------------ //
 // Quem começa uma operação demorada manda uma FICHA (um texto qualquer, único); para cancelar,
 // a tela chama `nucleo.cancelar` com a mesma ficha.
-fn fichas() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
-    static F: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
-        std::sync::OnceLock::new();
-    F.get_or_init(Default::default)
-}
+static FICHAS: crate::contexto_cliente::PorCliente<std::collections::HashSet<String>> =
+    crate::contexto_cliente::PorCliente::novo();
 
 /// A operação desta ficha foi cancelada?
 pub fn cancelada(ficha: &str) -> bool {
-    !ficha.is_empty() && fichas().lock().map(|f| f.contains(ficha)).unwrap_or(false)
+    !ficha.is_empty() && FICHAS.lock().is_ok_and(|f| f.contains(ficha))
 }
 
 pub fn cancelar(ficha: &str) {
-    if let Ok(mut f) = fichas().lock() {
-        f.insert(ficha.to_string());
+    if let Ok(mut f) = FICHAS.lock() {
+        f.insert(ficha.into());
     }
 }
 
 /// A operação acabou: a ficha não é mais lembrada.
 pub fn esquecer_ficha(ficha: &str) {
-    if let Ok(mut f) = fichas().lock() {
+    if let Ok(mut f) = FICHAS.lock() {
         f.remove(ficha);
     }
+}
+
+#[cfg(windows)]
+pub(crate) fn esquecer_cliente(pid: u32) {
+    FICHAS.esquecer(pid);
 }
 
 // ---- leitura de argumentos --------------------------------------------------------- //
@@ -164,10 +168,26 @@ pub(crate) fn js<T: serde::Serialize>(v: T) -> Res<Value> {
     Ok(serde_json::to_value(v)?)
 }
 
+fn chave_preferencia(a: &Value, gravar: bool) -> Res<String> {
+    let chave = texto(a, "chave")?;
+    match chave {
+        "ui.animacao_login" => Ok(chave.into()),
+        "ui.pdf_nativo" | "ui.minimizar_ao_fechar" => {
+            match a["prestador"].as_str().filter(|p| !p.is_empty()) {
+                Some(p) => Ok(format!("{chave}.{}", crate::cofre::so_doc(p))),
+                None if !gravar => Ok(chave.into()),
+                None => Err(Erro::valor("Selecione um prestador.")),
+            }
+        }
+        _ => Err(Erro::valor("Esta preferência não pode ser acessada diretamente.")),
+    }
+}
+
 fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
     if metodo.starts_with("permissoes.") {
         return crate::permissoes::executar(metodo, a);
     }
+    crate::permissoes::checar_escopo(metodo, a)?;
     crate::permissoes::checar_metodo(metodo, a)?;
     if metodo.starts_with("lotes.") { return crate::lotes::executar(metodo,a); }
     match metodo {
@@ -193,7 +213,13 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
                 "critical" => registro::Nivel::Critical,
                 _ => registro::Nivel::Info,
             };
-            registro::registrar(texto(a, "nome")?, nivel, texto(a, "msg")?);
+            let nome = texto(a, "nome")?;
+            if !nome.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+                || nome.eq_ignore_ascii_case("autorizacao")
+            {
+                return Err(Erro::valor("Categoria de registro inválida."));
+            }
+            registro::registrar(nome, nivel, &texto(a, "msg")?.replace(['\r', '\n'], " "));
             Ok(Value::Null)
         }
         "registro.sincronizar" => {
@@ -210,13 +236,8 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
             Path::new(texto(a, "destino")?),
             a.get("dias").and_then(Value::as_u64).unwrap_or(30) as u32,
         ),
-        "registro.definir_usuario" => {
-            registro::definir_usuario(
-                a.get("operador_id").and_then(Value::as_i64),
-                a.get("autorizador_id").and_then(Value::as_i64),
-            );
-            Ok(Value::Null)
-        }
+        // Compatibilidade com clientes antigos. A autoria vem da sessão no núcleo.
+        "registro.definir_usuario" => Ok(Value::Null),
 
         // ---- banco ----------------------------------------------------------------- //
         "banco.estado" => js(banco::estado()),
@@ -227,19 +248,15 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
             Ok(Value::Null)
         }
         "banco.get_meta" => {
-            let chave = texto(a, "chave")?;
-            if !matches!(
-                chave,
-                "ui.pdf_nativo" | "ui.animacao_login" | "ui.minimizar_ao_fechar"
-            ) {
-                return Err(Erro::valor(
-                    "Esta preferência não pode ser consultada diretamente.",
-                ));
+            let chave = chave_preferencia(a, false)?;
+            let valor = banco::get_meta(&chave)?;
+            if valor.is_empty() && chave != texto(a, "chave")? {
+                return js(banco::get_meta(texto(a, "chave")?)?);
             }
-            js(banco::get_meta(chave)?)
+            js(valor)
         }
         "banco.set_meta" => {
-            banco::set_meta(texto(a, "chave")?, texto(a, "valor")?)?;
+            banco::set_meta(&chave_preferencia(a, true)?, texto(a, "valor")?)?;
             Ok(Value::Null)
         }
         "banco.validar_banco" => {
@@ -343,14 +360,47 @@ fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Res<Value> {
                 }
                 Some(autorizador(a, "criado_por", "usuarios.adicionar")?)
             };
-            js(usuarios::criar(
+            js(usuarios::criar_com_codigo(
                 texto(a, "login")?,
                 texto(a, "nome")?,
                 inteiro(a, "nivel")?,
                 texto(a, "senha")?,
                 &prestadores,
                 por.as_ref(),
+                Some(texto_ou(a, "codigo", "")),
             )?)
+        }
+        // Código de autorização: a conta em uso consulta e troca o PRÓPRIO; o cadastro de uma
+        // conta nova confere a disponibilidade antes de criar.
+        "usuarios.codigo_proprio" => {
+            js(usuarios::codigo_de(crate::permissoes::operador_atual()?.id)?)
+        }
+        "usuarios.conferir_codigo" => {
+            let operador = crate::permissoes::operador_atual()?;
+            let proprio = logico(a, "proprio");
+            js(usuarios::conferir_codigo(
+                texto(a, "codigo")?,
+                proprio.then_some(operador.id),
+            )?)
+        }
+        "usuarios.definir_codigo_proprio" => {
+            let operador = crate::permissoes::operador_atual()?;
+            let codigo = usuarios::definir_codigo(operador.id, texto(a, "codigo")?)?;
+            crate::registro::info(
+                "usuarios",
+                &format!("Código de autorização definido pela conta #{}.", operador.id),
+            );
+            js(codigo)
+        }
+        "usuarios.redefinir_codigo" => {
+            let alvo = inteiro(a, "usuario_id")?;
+            let por = crate::permissoes::autorizador("usuarios.senha", None)?
+                .ok_or_else(|| Erro::valor("Autorize a redefinição do código."))?;
+            let codigo = usuarios::redefinir_codigo(alvo, texto(a, "codigo")?, &por)?;
+            crate::registro::info("usuarios", &format!(
+                "Código de autorização da conta #{alvo} redefinido pela conta #{}.", por.id
+            ));
+            js(codigo)
         }
         "usuarios.listar" => js(usuarios::listar()?),
         "usuarios.definir_ativo" => {

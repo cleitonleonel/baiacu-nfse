@@ -3,6 +3,8 @@
 /// ambiente, o trilho lateral e a tela à vista.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../kit/flet.dart';
@@ -18,6 +20,7 @@ import '../telas/lotes.dart';
 import 'ajuda.dart';
 import 'app.dart';
 import 'atualizacao.dart';
+import 'codigo_autorizacao.dart';
 import 'menu_usuario.dart';
 import 'prestador_novo.dart';
 import 'registros.dart';
@@ -66,8 +69,29 @@ class _CascaState extends State<Casca> {
 
       app.agendar(const Duration(seconds: 5), () => procurar(aoEntrar: true));
       app.agendar(const Duration(seconds: 12), () => avisarModoAntigo(app));
-      if (app.semPrestador) return;
+      // Conta sem código de autorização (anterior a ele, ou o master recém-criado): convite.
+      app.agendar(
+        const Duration(milliseconds: 800),
+        () => unawaited(pedirCodigoSeFaltar(app)),
+      );
+      if (app.prestador.isEmpty) return;
       app.atualizarLotesPendentes();
+      final dono = app.prestador;
+      unawaited(() async {
+        try {
+          final r = await chamar<Object?>('cofre.reconciliar_substituicoes', {
+            'dono': dono,
+            'recuperar_envios': true,
+          });
+          if (mounted && app.viva && dono == app.prestador &&
+              r is Map && (r['recuperadas'] as num? ?? 0) > 0) {
+            app.refazerAvisoFila?.call();
+            app.notasMudaram();
+          }
+        } catch (e) {
+          registrar('Conferência de substituições pendente: $e', nivel: 'warning');
+        }
+      }());
       chamar<Object?>('pdf.aquecer_danfse').catchError((Object _) => null);
       chamar<Object?>('emissao.aquecer').catchError((Object _) => null);
       aquecerCatalogos(context);
@@ -83,7 +107,7 @@ class _CascaState extends State<Casca> {
 
   @override
   Widget build(BuildContext context) {
-    final camadaApp = app.semPrestador ? _semPrestador() : _comPrestador();
+    final camadaApp = _comPrestador();
     return Stack(
       clipBehavior: Clip.hardEdge,
       children: [
@@ -117,69 +141,6 @@ class _CascaState extends State<Casca> {
     child: lin(filhos, idLayout: 'Grupo.casca.lin.1'),
   );
 
-  Widget _semPrestador() => col(
-    [
-      _topo([const Expanded(child: SizedBox()), MenuUsuario(app: app)]),
-      Expanded(
-        child: Ct(
-          alinhar: Alignment.center,
-          child: col(
-            [
-              Icon(
-                Icons.storefront_outlined,
-                size: 72,
-                color: Colors.grey.shade400,
-              ),
-              Tx(
-                'Nenhum prestador liberado para este usuário',
-                tam: Letra.titulo,
-                peso: FontWeight.bold,
-                alinhar: TextAlign.center,
-                largura: TamanhosNavegacao
-                    .rotuloNenhumPrestadorLiberadoParaEsteUsuario
-                    .largura,
-                altura: TamanhosNavegacao
-                    .rotuloNenhumPrestadorLiberadoParaEsteUsuario
-                    .altura,
-                idLayout:
-                    'TamanhosNavegacao.rotuloNenhumPrestadorLiberadoParaEsteUsuario',
-              ),
-              Tx(
-                app.temPermissao('usuarios.prestadores')
-                    ? 'Libere os prestadores que deseja operar.'
-                    : 'Para operar, peça a um usuário autorizado para liberar um prestador para você.',
-                tam: Letra.texto,
-                cor: Colors.grey.shade700,
-                alinhar: TextAlign.center,
-                largura: TamanhosNavegacao
-                    .rotuloParaOperarPecaAUmUsuarioDeNivel
-                    .largura,
-                altura: TamanhosNavegacao
-                    .rotuloParaOperarPecaAUmUsuarioDeNivel
-                    .altura,
-                idLayout:
-                    'TamanhosNavegacao.rotuloParaOperarPecaAUmUsuarioDeNivel',
-              ),
-              if (app.temPermissao('usuarios.prestadores'))
-                Botao(
-                  'Liberar prestadores',
-                  icone: Icons.add_link,
-                  aoClicar: () => gerirPrestadores(app, app.usuario),
-                  idLayout: 'Casca.botaoLiberarPrestadores',
-                ),
-            ],
-            cruzado: CrossAxisAlignment.center,
-            espaco: 12,
-            justa: true,
-            idLayout: 'Grupo.casca.col.2',
-          ),
-        ),
-      ),
-    ],
-    espaco: 0,
-    idLayout: 'Grupo.casca.col.1',
-  );
-
   Widget _comPrestador() => col(
     [
       _topo([
@@ -195,7 +156,6 @@ class _CascaState extends State<Casca> {
             idLayout: 'TamanhosNavegacao.campoPrestador',
           ),
         ),
-        // Ícones visíveis a todos; o acesso é protegido por senha de nível 3.
         BotaoIcone(
           Icons.add_business,
           dica: 'Adicionar prestador',
@@ -212,6 +172,13 @@ class _CascaState extends State<Casca> {
           altura: TamanhosNavegacao.botaoUsuarios.altura,
           idLayout: 'TamanhosNavegacao.botaoUsuarios',
         ),
+        if (app.semPrestador)
+          BotaoIcone(
+            Icons.add_link,
+            dica: 'Liberar prestadores',
+            aoClicar: () => gerirPrestadores(app, app.usuario),
+            idLayout: 'Casca.botaoLiberarPrestadores',
+          ),
         const Expanded(child: SizedBox()),
         BotaoAtualizacao(app: app),
         BotaoRegistros(app: app),
@@ -219,7 +186,8 @@ class _CascaState extends State<Casca> {
       ]),
       ValueListenableBuilder<int>(
         valueListenable: app.tiqueCasca,
-        builder: (context, _, _) => _faixaAmbiente(),
+        builder: (context, _, _) =>
+            app.prestador.isEmpty ? const SizedBox.shrink() : _faixaAmbiente(),
       ),
       Expanded(
         child: lin(
@@ -296,19 +264,22 @@ class _Telas extends StatelessWidget {
                 enabled: app.navAtual == i,
                 child: ExcludeFocus(
                   excluding: app.navAtual != i,
-                  child: Visibility(
-                    visible: app.temPermissao(App.modulosNavegacao[i]),
-                    maintainState: true,
-                    replacement: AcessoRestrito(
-                      aoAutorizar: () => app.exigirPermissao(
-                        App.modulosNavegacao[i],
-                        app.atualizar,
-                      ),
-                    ),
-                    child: TravaDaVez(
-                      aVista: app.navAtual == i,
-                      child: telas[i],
-                    ),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (i == 3 || i == 4 || app.prestador.isNotEmpty)
+                        Visibility(
+                          visible: app.temPermissao(App.modulosNavegacao[i]),
+                          maintainState: true,
+                          child: TravaDaVez(
+                            aVista: app.navAtual == i,
+                            child: telas[i],
+                          ),
+                        ),
+                      if (app.navAtual == i &&
+                          !app.temPermissao(App.modulosNavegacao[i]))
+                        AcessoRestrito(aoAutorizar: () => app.irPara(i)),
+                    ],
                   ),
                 ),
               ),

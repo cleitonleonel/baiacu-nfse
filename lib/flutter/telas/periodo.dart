@@ -12,6 +12,7 @@ import '../kit/formatos.dart' show lerDataDoCampo;
 const opcoesBasePeriodo = [
   Opcao('emissao', 'Emissão'),
   Opcao('competencia', 'Competência'),
+  Opcao('movimento', 'Movimento'),
 ];
 
 const periodos = [

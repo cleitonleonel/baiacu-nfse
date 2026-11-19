@@ -39,8 +39,6 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 
 ## ✨ Tudo o que ele faz
 
-> As novas capturas usam dados fictícios e mostram a revisão local sobre a versão 1.0.0.5. O botão de download abre a distribuição publicada no GitHub.
-
 <p align="center">
   <img src="docs/imagens/recursos.svg" alt="Recursos do Baiacu NFS-e" width="100%">
 </p>

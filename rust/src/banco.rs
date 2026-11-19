@@ -16,13 +16,13 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::Duration;
 
 use rusqlite::backup::{Backup, StepResult};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::caminhos;
+use crate::contexto_cliente::PorCliente;
 use crate::erro::{Erro, Res};
 use crate::ini::Ini;
 
@@ -33,11 +33,12 @@ struct Estado {
     iniciado: bool,
 }
 
-static ESTADO: Mutex<Estado> = Mutex::new(Estado {
-    chave: None,
-    sal: None,
-    iniciado: false,
-});
+static ESTADO: PorCliente<Estado> = PorCliente::novo();
+
+#[cfg(windows)]
+pub(crate) fn esquecer_cliente(pid: u32) {
+    ESTADO.esquecer(pid);
+}
 
 pub const META_CHAVE_NOTAS: &str = "notas.chave"; // chave do database/notas.db, em hexadecimal
 const TABELAS_BACKUP: [&str; 3] = ["arquivo", "config", "contador"];
@@ -267,6 +268,14 @@ pub fn criar_tabelas(con: &Connection) -> Res<()> {
             ambiente TEXT NOT NULL, competencia TEXT NOT NULL, estado TEXT NOT NULL,
             resultado TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (prestador, lote, linha, ambiente, competencia)
+        );
+        CREATE TABLE IF NOT EXISTS subst_pendente (
+            prestador    TEXT NOT NULL,
+            chave_antiga TEXT NOT NULL,
+            chave_nova   TEXT NOT NULL,
+            criado       TEXT NOT NULL,
+            erro         TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (prestador, chave_antiga)
         );
         CREATE TABLE IF NOT EXISTS lote_envio_servico (
             prestador TEXT NOT NULL, tomador TEXT NOT NULL, servico TEXT NOT NULL,
@@ -574,6 +583,17 @@ pub fn set_contador(caminho: &str, valor: i64) -> Res<()> {
     let con = conn()?;
     con.execute(
         "INSERT OR REPLACE INTO contador (arquivo, valor) VALUES (?1, ?2)",
+        params![caminhos::chave_logica(caminho), valor.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Reserva a numeração na mesma transação que guarda a DPS que a usa.
+pub(crate) fn reservar_contador_em(con: &Connection, caminho: &str, valor: i64) -> Res<()> {
+    con.execute(
+        "INSERT INTO contador (arquivo, valor) VALUES (?1, ?2) \
+         ON CONFLICT(arquivo) DO UPDATE SET valor=excluded.valor \
+         WHERE CAST(contador.valor AS INTEGER) < CAST(excluded.valor AS INTEGER)",
         params![caminhos::chave_logica(caminho), valor.to_string()],
     )?;
     Ok(())

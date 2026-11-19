@@ -44,13 +44,12 @@ pub fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Option<Res<Value>> {
     Some(match metodo {
         "dashboard.resumo" => (|| {
             let dono = texto(a, "dono")?;
-            crate::permissoes::exigir_prestador_da_sessao(dono)?;
             let anteriores = a.get("anteriores")
                 .map(|v| serde_json::from_value::<Vec<[String; 2]>>(v.clone()))
                 .transpose()?
                 .unwrap_or_default();
             crate::dashboard::resumo(
-                dono, texto(a, "ini")?, texto(a, "fim")?, logico(a, "competencia"), &anteriores,
+                dono, texto(a, "ini")?, texto(a, "fim")?, logico(a, "competencia"), logico(a, "movimento"), &anteriores,
             )
         })(),
         // ---- busca --------------------------------------------------------------------- //
@@ -87,6 +86,28 @@ pub fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Option<Res<Value>> {
             )?;
             Ok(Value::Null)
         })(),
+        // XML guardado que não abre: busca de novo na SEFIN pela chave e troca a cópia.
+        "cofre.rebuscar_xml" => (|| {
+            let dono = texto(a, "dono")?;
+            let nota_id = match a.get("nota_id").and_then(Value::as_i64) {
+                Some(id) => id,
+                None => cofre::nota_por_chave(dono, texto(a, "chave")?)?
+                    .map(|n| n.id)
+                    .ok_or_else(|| crate::erro::Erro::valor("Esta nota não está no banco de notas."))?,
+            };
+            crate::emissao::rebuscar_nfse(dono, nota_id, None)
+        })(),
+        "cofre.reconciliar_substituicoes" => (|| {
+            let dono = texto(a, "dono")?;
+            if logico(a, "recuperar_envios") {
+                let recuperadas = crate::emissao::recuperar_substituicoes_enfileiradas(dono, None)?;
+                let pendentes = cofre::reconciliar_substituicoes(dono)?;
+                Ok(json!({ "recuperadas": recuperadas, "pendentes": pendentes }))
+            } else {
+                Ok(json!(cofre::reconciliar_substituicoes(dono)?))
+            }
+        })(),
+        "cofre.substituicoes_pendentes" => (|| cofre::substituicoes_pendentes(texto(a, "dono")?))(),
         "cofre.pares_substituicao" => (|| {
             Ok(json!(
                 cofre::pares_substituicao(texto(a, "dono")?)?
@@ -106,7 +127,7 @@ pub fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Option<Res<Value>> {
             )
         })(),
         "cofre.nota_por_id" => (|| {
-            Ok(cofre::nota_por_id(inteiro(a, "nota_id")?)?
+            Ok(cofre::nota_por_id_da_sessao(inteiro(a, "nota_id")?)?
                 .as_ref()
                 .map(nota_js)
                 .unwrap_or(Value::Null))
@@ -125,7 +146,7 @@ pub fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Option<Res<Value>> {
                 texto(a, "chave")?,
             )?))
         })(),
-        "cofre.xml_da_nota" => (|| Ok(b64(&cofre::xml_da_nota(inteiro(a, "nota_id")?)?)))(),
+        "cofre.xml_da_nota" => (|| Ok(b64(&cofre::xml_da_nota_da_sessao(inteiro(a, "nota_id")?)?)))(),
         "cofre.eventos_da_nota" => (|| {
             let eventos = cofre::eventos_da_nota(texto(a, "dono")?, texto(a, "chave")?)?;
             Ok(json!(
@@ -148,50 +169,26 @@ pub fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Option<Res<Value>> {
         )),
         "cofre.alvos" => (|| {
             let cfg = cofre::config();
-            let mut prestadores = despacho::lista_de_textos(a, "prestadores");
-            if let Some(id) = a
-                .get("usuario")
-                .and_then(|u| u.get("id"))
-                .and_then(Value::as_i64)
-            {
-                let usuario = crate::usuarios::por_id(id)?;
-                let existentes = cadastro::list_prestadores()?;
-                let vinculados = crate::usuarios::prestadores_vinculados(id)?;
-                prestadores = existentes
-                    .into_iter()
-                    .filter(|p| {
-                        usuario.ativo && (usuario.is_master() || vinculados.contains(&p.documento))
-                    })
-                    .filter(|p| {
-                        cfg.prestadores != "usuario"
-                            || usuario.is_master()
-                            || vinculados.contains(&p.documento)
-                    })
-                    .map(|p| p.documento)
-                    .collect();
-            }
-            let atual = texto_ou(a, "prestador_em_uso", "");
-            let atual = if prestadores.iter().any(|p| p == atual) {
-                atual
-            } else {
-                ""
-            };
-            let ambiente = |p: &str| {
-                cadastro::get_ambiente(p).unwrap_or_else(|_| cofre::AMB_PRODUCAO.to_string())
-            };
-            let alvos = cofre::alvos(&cfg, atual, &prestadores, &ambiente);
-            Ok(json!(
-                alvos
-                    .into_iter()
-                    .map(|(p, amb)| json!([p, amb]))
-                    .collect::<Vec<_>>()
-            ))
+            let prestador = texto(a, "prestador_em_uso")?;
+            crate::permissoes::exigir_prestador_da_sessao(prestador)?;
+            let amb = cadastro::get_ambiente(prestador)?;
+            js(cofre::ambientes_de(&cfg, &amb).into_iter()
+                .map(|amb| [prestador.to_owned(), amb]).collect::<Vec<_>>())
         })(),
         "cofre.ultima_automatica" => js(cofre::ultima_automatica()),
-        "cofre.marcar_automatica" => {
-            cofre::marcar_automatica(a.get("quando").and_then(Value::as_i64));
-            Ok(Value::Null)
-        }
+        "cofre.sincronizar_automaticamente" => (|| {
+            crate::permissoes::operador_atual()?;
+            let ficha = texto_ou(a, "ficha", "");
+            let cancelar = || despacho::cancelada(ficha);
+            let acompanhar = Acompanhar {
+                progresso: None,
+                cancelar: Some(&cancelar),
+                dormir: &cofre::dormir_de_verdade,
+            };
+            let resultado = cofre::sincronizar_automatica(&acompanhar);
+            despacho::esquecer_ficha(ficha);
+            resultado
+        })(),
         "cofre.sincronizar" | "cofre.sincronizar_varios" => (|| {
             let ficha = texto_ou(a, "ficha", "").to_string();
             let cancelar = || despacho::cancelada(&ficha);
@@ -201,8 +198,16 @@ pub fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Option<Res<Value>> {
                 dormir: &cofre::dormir_de_verdade,
             };
             let resultado = if metodo.ends_with("_varios") {
+                let pares = pares(a, "pares");
+                let Some((dono, _)) = pares.first() else {
+                    return Err(crate::erro::Erro::valor("Selecione um prestador."));
+                };
+                crate::permissoes::exigir_prestador_da_sessao(dono)?;
+                if pares.iter().any(|(p, _)| p != dono) {
+                    return Err(crate::erro::Erro::valor("Sincronize apenas o prestador em uso."));
+                }
                 cofre::sincronizar_varios(
-                    &pares(a, "pares"),
+                    &pares,
                     None,
                     &acompanhar,
                     logico(a, "forcar"),

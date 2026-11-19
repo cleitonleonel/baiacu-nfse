@@ -8,7 +8,8 @@
 // Evita abrir outra instancia do mesmo executavel enquanto o Flutter prepara o acesso.
 class StartupGuard {
  public:
-  StartupGuard() {
+  explicit StartupGuard(bool ativa = true) {
+    if (!ativa) return;
     wchar_t path[32768] = {};
     GetModuleFileNameW(nullptr, path, 32768);
     unsigned long long hash = 14695981039346656037ull;

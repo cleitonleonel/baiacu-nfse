@@ -316,6 +316,16 @@
     ]
   },
   {
+    "id": "cofre.rebuscar",
+    "rotulo": "Buscar de novo na SEFIN o XML que não abre",
+    "pai": "cofre",
+    "padrao": 1,
+    "fixo": false,
+    "metodos": [
+      "cofre.rebuscar_xml"
+    ]
+  },
+  {
     "id": "cofre.pdf",
     "rotulo": "Visualizar / salvar DANFSe",
     "pai": "cofre",
@@ -460,7 +470,7 @@
   },
   {
     "id": "config.geral",
-    "rotulo": "Preferências gerais",
+    "rotulo": "Sistema",
     "pai": "config",
     "padrao": 1,
     "fixo": false,
@@ -472,7 +482,9 @@
     "pai": "config",
     "padrao": 3,
     "fixo": false,
-    "metodos": ["lotes.salvar_aviso"]
+    "metodos": [
+      "lotes.salvar_aviso"
+    ]
   },
   {
     "id": "config.personalizacao",
@@ -614,7 +626,9 @@
     "pai": "ajuda",
     "padrao": 2,
     "fixo": false,
-    "metodos": []
+    "metodos": [
+      "registro.exportar_suporte"
+    ]
   },
   {
     "id": "prestadores",
@@ -703,12 +717,13 @@
   },
   {
     "id": "usuarios.senha",
-    "rotulo": "Redefinir senha",
+    "rotulo": "Redefinir senha e código de autorização",
     "pai": "usuarios",
     "padrao": 3,
     "fixo": false,
     "metodos": [
-      "usuarios.redefinir_senha"
+      "usuarios.redefinir_senha",
+      "usuarios.redefinir_codigo"
     ]
   },
   {
@@ -719,7 +734,8 @@
     "fixo": false,
     "metodos": [
       "usuarios.vincular_prestador",
-      "usuarios.desvincular_prestador"
+      "usuarios.desvincular_prestador",
+      "cadastro.list_prestadores_para_vincular"
     ]
   },
   {
@@ -831,7 +847,9 @@
     "pai": "lotes",
     "padrao": 1,
     "fixo": false,
-    "metodos": ["exportacao.lotes_zip"]
+    "metodos": [
+      "exportacao.lotes_zip"
+    ]
   },
   {
     "id": "dashboard",
@@ -839,6 +857,8 @@
     "pai": "",
     "padrao": 1,
     "fixo": false,
-    "metodos": ["dashboard.resumo"]
+    "metodos": [
+      "dashboard.resumo"
+    ]
   }
 ]

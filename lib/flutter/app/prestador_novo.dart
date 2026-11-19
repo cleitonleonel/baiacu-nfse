@@ -184,16 +184,29 @@ void abrirNovoPrestador(App app) {
       'Prestador criado: ${formatarDocumento(criado)} ($tipoDoc) já com certificado'
       '${procurador ? ' (marcado como de procurador)' : ''}',
     );
-    app.ddPrestador.opcoes = [
-      for (final p in jaLista('cadastro.list_prestadores'))
-        Opcao(p['documento'] as String, p['display'] as String),
-    ];
-    app.ddPrestador.por(criado);
-    app.fecharDialogo();
-    app.trocarPrestador(criado);
+    if (!app.master && app.temPermissao('usuarios.prestadores')) {
+      final por = app.autorizadorDaAcao('usuarios.prestadores');
+      if (por != null) {
+        try {
+          await chamar<Object?>('usuarios.vincular_prestador', {
+            'usuario_id': app.usuario.id,
+            'prestador': criado,
+            'por': por.paraJson(),
+          });
+        } catch (e) {
+          app.toast('Prestador criado. Não foi possível vincular seu usuário: $e', erro: true);
+        }
+      }
+    }
+    if (!app.viva || !d.aberto) return;
+    app.recarregarPrestadores();
+    final podeOperar = app.ddPrestador.opcoes.any((o) => o.chave == criado);
+    app.fecharEsta(d);
+    if (podeOperar) app.trocarPrestador(criado);
     app.toast(
-      'Prestador ${formatarDocumento(criado)} criado com certificado. '
-      'Preencha os tributos e confira os dados em Configurações › Prestador.',
+      podeOperar
+          ? 'Prestador criado com certificado. Confira os dados em Configurações.'
+          : 'Prestador criado com certificado. É preciso liberar o vínculo para operá-lo.',
     );
   }
 

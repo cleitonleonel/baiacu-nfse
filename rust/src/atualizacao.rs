@@ -25,7 +25,7 @@ use crate::erro::{Erro, Res};
 use crate::rede::{Sessao, Tempo};
 
 /// Versão deste programa. `compilar_exe.py` confere que é a mesma do `pubspec.yaml`.
-pub const VERSAO: &str = "1.0.0.6";
+pub const VERSAO: &str = "1.0.0.7";
 /// Repositório onde saem as versões novas (dono/nome).
 pub const REPOSITORIO: &str = "williamlala/baiacu-nfse";
 /// Nome do executável do programa empacotado.
@@ -238,7 +238,6 @@ fn sessao(segundos: f64) -> Res<Sessao> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Release {
     pub versao: String,
-    pub notas: String,
     pub pagina: String,
     pub zip_nome: String,
     pub zip_url: String,
@@ -279,7 +278,6 @@ pub fn release_de(v: &Value) -> Res<Release> {
         .ok_or_else(|| erro("A release não tem assinatura Ed25519. Atualização recusada."))?;
     Ok(Release {
         versao: versao.trim_start_matches(['v', 'V']).to_string(),
-        notas: v["body"].as_str().unwrap_or("").trim().to_string(),
         pagina: v["html_url"].as_str().unwrap_or("").to_string(),
         zip_url: zip["browser_download_url"]
             .as_str()
@@ -405,7 +403,6 @@ pub fn verificar(automatica: bool, ao_entrar: bool) -> Res<Value> {
         "consultou": true,
         "versao_atual": VERSAO,
         "versao": r.versao,
-        "notas": r.notas,
         "pagina": r.pagina,
         "tamanho": r.zip_tamanho,
         "instalavel": instalado().is_some(),
@@ -512,7 +509,7 @@ pub fn baixar(versao_exibida: Option<&str>, avisar: Avisar) -> Res<Value> {
     let r = ultima_release()?;
     if versao_exibida.is_some_and(|versao| versao != r.versao) {
         return Err(erro(
-            "A última versão mudou. Procure por atualizações para ver as notas mais recentes.",
+            "A última versão mudou. Procure por atualizações novamente.",
         ));
     }
     if !mais_nova(&r.versao, VERSAO) {

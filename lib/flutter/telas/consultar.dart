@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import '../app/app.dart';
 import '../app/correio.dart';
 import '../app/sistema.dart';
+import '../app/xml_ilegivel.dart';
 import '../kit/arquivos.dart';
 import '../kit/campo.dart';
 import '../kit/flet.dart';
@@ -402,19 +403,25 @@ class ConsultarState extends State<TelaConsultar>
     _pendContagem.value = 'reenviando…';
     app.emSegundoPlano(() async {
       var certos = 0;
+      var cofrePendente = 0;
       final falhas = <String>[];
       for (final p in pend) {
         try {
-          await chamar<Object?>('emissao.reenviar_pendente', {
+          final r = await chamar<Object?>('emissao.reenviar_pendente', {
             'prestador': prest,
             'p': p,
             'cert': cert,
+            'automatico': automatico,
           });
+          if (r is Map && r['subst_cofre_pendente'] == true) cofrePendente++;
           certos++;
           registrar(
             'Pendente nº ${p['n_dps']} reenviado com sucesso (prestador=$prest)',
           );
         } catch (e) {
+          if (automatico && e is ErroNucleo && e.tipo == 'DpsNaoLocalizada') {
+            continue;
+          }
           falhas.add('nº ${p['n_dps']}: $e');
           registrar(
             'Reenvio do pendente nº ${p['n_dps']} falhou (prestador=$prest): $e',
@@ -426,6 +433,11 @@ class ConsultarState extends State<TelaConsultar>
       if (certos > 0) {
         app.notasMudaram(); // notas novas: a Consulta recarrega
         app.toast('$certos NFS-e pendente(s) transmitida(s) com sucesso.');
+      }
+      if (cofrePendente > 0) {
+        app.toast(
+          '$cofrePendente substituição(ões) autorizada(s) na SEFIN. Atualização do Cofre pendente.',
+        );
       }
       // no ciclo automático a falha fica só no registro e no aviso
       if (falhas.isNotEmpty && !automatico) {
@@ -459,11 +471,13 @@ class ConsultarState extends State<TelaConsultar>
     _pendEnviando = true;
     app.toast('Reenviando DPS nº ${p['n_dps']}…');
     app.emSegundoPlano(() async {
+      Object? r;
       try {
-        await chamar<Object?>('emissao.reenviar_pendente', {
+        r = await chamar<Object?>('emissao.reenviar_pendente', {
           'prestador': prest,
           'p': p,
           'cert': cert,
+          'automatico': false,
         });
       } catch (e) {
         _pendEnviando = false;
@@ -472,13 +486,19 @@ class ConsultarState extends State<TelaConsultar>
           nivel: 'error',
         );
         app.toast('Reenvio falhou: $e', erro: true);
+        _refazerAvisoFila();
+        if (app.prestador == prest && app.navAtual == 2) carregarPagina();
         return;
       }
       _pendEnviando = false;
       registrar(
         'Pendente nº ${p['n_dps']} reenviado com sucesso (prestador=$prest)',
       );
-      app.toast('NFS-e da DPS nº ${p['n_dps']} transmitida!');
+      app.toast(
+        r is Map && r['subst_cofre_pendente'] == true
+            ? 'NFS-e da DPS nº ${p['n_dps']} transmitida. Substituição autorizada na SEFIN. Atualização do Cofre pendente.'
+            : 'NFS-e da DPS nº ${p['n_dps']} transmitida!',
+      );
       app.notasMudaram();
       _refazerAvisoFila();
       if (app.prestador == prest && app.navAtual == 2) carregarPagina();
@@ -925,6 +945,7 @@ class ConsultarState extends State<TelaConsultar>
       'tomadores': comBusca ? toms : null,
       'ini': dataIso(ini),
       'por_competencia': _ddBasePeriodo.valor == 'competencia',
+      if (_ddBasePeriodo.valor == 'movimento') 'por_movimento': true,
       'fim': dataIso(fim),
       'termo': comBusca ? termo : '',
       'sort_col': _ordem?.$1,
@@ -1125,7 +1146,7 @@ class ConsultarState extends State<TelaConsultar>
         danfse,
         eventos,
         fmts,
-        porCompetencia: ddBase.valor == 'competencia',
+        baseDaData: ddBase.valor,
       );
     }
 
@@ -1362,14 +1383,15 @@ class ConsultarState extends State<TelaConsultar>
     bool danfse,
     bool eventos,
     List<String> fmts, {
-    required bool porCompetencia,
+    required String? baseDaData,
   }) async {
     final (toms, _, _, termo, _) = filtro();
     final prestador = app.prestador;
     final base = <String, Object?>{
       'prestador': prestador,
       'ini': dataIso(ini),
-      'por_competencia': porCompetencia,
+      'por_competencia': baseDaData == 'competencia',
+      if (baseDaData == 'movimento') 'por_movimento': true,
       'fim': dataIso(fim),
       'ambiente': amb ?? '',
     };
@@ -1544,18 +1566,34 @@ class ConsultarState extends State<TelaConsultar>
     // Se o usuário renomeou o arquivo na janela do Windows, o nome pode vir SEM a extensão.
     if (!destino.toLowerCase().endsWith('.xml')) destino += '.xml';
     final numero = _ou(rec['nNFSe'], '?');
-    try {
-      final b64 = ja<String>('cofre.xml_por_chave', {
-        'dono': app.prestador,
-        'chave': rec['chave'],
-      });
-      File(destino).writeAsBytesSync(base64Decode(b64));
-      app.toast(
-        'XML da NFS-e nº $numero (${rec['ambiente_label']}) salvo em: $destino',
-      );
-    } catch (e) {
-      app.toast('Falha ao salvar XML da NFS-e nº $numero: $e', erro: true);
+    final dest = destino;
+    void gravar() {
+      try {
+        final b64 = ja<String>('cofre.xml_por_chave', {
+          'dono': app.prestador,
+          'chave': rec['chave'],
+        });
+        File(dest).writeAsBytesSync(base64Decode(b64));
+        app.toast(
+          'XML da NFS-e nº $numero (${rec['ambiente_label']}) salvo em: $dest',
+        );
+      } catch (e) {
+        final id = notaComXmlIlegivel(e);
+        if (id != null) {
+          oferecerRebusca(
+            app,
+            dono: app.prestador,
+            notaId: id,
+            rotulo: 'NFS-e nº $numero',
+            aoRecuperar: gravar,
+          );
+          return;
+        }
+        app.toast('Falha ao salvar XML da NFS-e nº $numero: $e', erro: true);
+      }
     }
+
+    gravar();
   }
 
   // ---- estorno (cancelamento) de NFS-e --------------------------------------------------------- //
@@ -2059,6 +2097,7 @@ class ConsultarState extends State<TelaConsultar>
     String s(String k) => (p[k] as String?) ?? '';
     // chave preenchida: a SEFIN JÁ aceitou esta nota — o reenvio só conclui o download.
     final aceita = s('chave').trim().isNotEmpty;
+    final substituicao = s('subst_chave').isNotEmpty;
     return DataRow(
       // A chave é da POSIÇÃO, não do registro: trocar de página, filtrar ou ordenar atualiza
       // as linhas que já estão montadas em vez de desmontar todas e montar outras.
@@ -2111,6 +2150,8 @@ class ConsultarState extends State<TelaConsultar>
                     cor: Colors.orange.shade800,
                     dica: aceita
                         ? 'Concluir download (nota já aceita)'
+                        : substituicao
+                        ? 'Conferir na SEFIN e reenviar se a DPS não for localizada'
                         : 'Reenviar agora',
                     aoClicar: () => _reenviarUm(p),
                     largura: TamanhosConsultar
@@ -2131,9 +2172,8 @@ class ConsultarState extends State<TelaConsultar>
                     altura: TamanhosConsultar.botaoBaixarDPSXMLAssinado.altura,
                     idLayout: 'TamanhosConsultar.botaoBaixarDPSXMLAssinado',
                   ),
-                  // Nota já aceita não pode ser "cancelada da fila": o número está consumido
-                  // na SEFIN.
-                  if (!aceita)
+                  // A DPS da substituição fica na fila enquanto ainda pode ter sido aceita.
+                  if (!aceita && !substituicao)
                     _menuMais([
                       _item(
                         'Cancelar envio (tira da fila)',
@@ -2206,9 +2246,11 @@ class ConsultarState extends State<TelaConsultar>
           DataCell(
             _celula(
               4,
-              _ddBasePeriodo.valor == 'competencia'
-                  ? dataIsoParaBr(s('dCompet'))
-                  : dataHora(s('dhProc')),
+              switch (_ddBasePeriodo.valor) {
+                'competencia' => dataIsoParaBr(s('dCompet')),
+                'movimento' => dataHora(s('movimento')),
+                _ => dataHora(s('dhProc')),
+              },
               cor: cor,
             ),
           ),
@@ -2388,9 +2430,11 @@ class ConsultarState extends State<TelaConsultar>
         coluna('Documento'),
         coluna('Grupo'),
         coluna(
-          _ddBasePeriodo.valor == 'competencia'
-              ? 'Competência'
-              : 'Processada em',
+          switch (_ddBasePeriodo.valor) {
+            'competencia' => 'Competência',
+            'movimento' => 'Movimento',
+            _ => 'Processada em',
+          },
         ),
         coluna('Ambiente'),
         coluna('Status'),
@@ -2440,9 +2484,9 @@ class ConsultarState extends State<TelaConsultar>
             idLayout: 'TamanhosConsultar.rotuloConsultarNFSEEmitidas',
           ),
           const Expanded(child: SizedBox()),
-          Botao.contorno(
-            'Exportar dados',
-            icone: Icons.download,
+          BotaoIcone(
+            Icons.download,
+            dica: 'Exportar dados',
             aoClicar: _abrirExportar,
             largura: TamanhosConsultar.botaoExportarDados.largura,
             altura: TamanhosConsultar.botaoExportarDados.altura,
@@ -2631,6 +2675,17 @@ void abrirDanfse(App app, String chave, {String rotulo = ''}) {
         'chave': chave,
       });
     } catch (e) {
+      final id = notaComXmlIlegivel(e);
+      if (id != null && app.viva) {
+        oferecerRebusca(
+          app,
+          dono: prest,
+          notaId: id,
+          rotulo: nome,
+          aoRecuperar: () => abrirDanfse(app, chave, rotulo: rotulo),
+        );
+        return;
+      }
       app.toast('Não foi possível gerar a DANFSe da $nome: $e', erro: true);
       return;
     }

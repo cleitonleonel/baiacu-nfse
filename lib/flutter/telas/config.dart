@@ -162,6 +162,7 @@ class ConfigState extends State<TelaConfig> {
   _CartaoEmail? _email;
   late _CartaoPersonalizacao _personalizacao;
   late _CartaoGeral _geral;
+  late _CartaoInicializacao _inicializacao;
   late _CartaoPdf _pdf;
   late _CartaoBanco _banco;
   late _CartaoProtecao _protecao;
@@ -196,7 +197,11 @@ class ConfigState extends State<TelaConfig> {
   }
 
   void _entrar() {
-    if (_montada && _montadaPara == app.prestador) return;
+    if (!app.temPermissao('config')) return;
+    if (_montada && _montadaPara == app.prestador) {
+      unawaited(_inicializacao.ler());
+      return;
+    }
     _montar();
     if (mounted) setState(() {});
   }
@@ -223,6 +228,7 @@ class ConfigState extends State<TelaConfig> {
     _ambiente = tem ? _CartaoAmbiente(this) : null;
     _personalizacao = _CartaoPersonalizacao(this);
     _geral = _CartaoGeral(this);
+    _inicializacao = _CartaoInicializacao(this);
     _atualizacao = _CartaoAtualizacao(this);
     _logs = _CartaoLogs(this);
     _tabelas = _CartaoTabelas(this);
@@ -241,6 +247,7 @@ class ConfigState extends State<TelaConfig> {
       ?_ambiente,
       _personalizacao,
       _geral,
+      _inicializacao,
       _atualizacao,
       _logs,
       _tabelas,
@@ -554,18 +561,36 @@ class ConfigState extends State<TelaConfig> {
     // Trocar de aba (ou de sub-aba) com uma edição aberta re-trava o cartão (segurança).
     void aoMudar(int _) => retravar();
 
-    final avancado = Ct(
+    final outros = Ct(
       padding: const EdgeInsets.fromLTRB(0, 6, 0, 0),
       child: Abas(
-        key: ValueKey('avancado-$_geracao'),
+        key: ValueKey('outros-$_geracao'),
         secundaria: true,
         inicial: tem ? 0 : 2,
-        // Sem prestador, do Avançado só o Backup (é onde se restaura um backup numa instalação nova).
-        desabilitadas: tem ? const {} : const {0, 1, 3, 5},
-        aoMudar: aoMudar,
+        desabilitadas: tem ? const {} : const {0, 1},
+        aoMudar: (indice) {
+          aoMudar(indice);
+          if (indice == 2) unawaited(_inicializacao.ler());
+        },
         rotulos: const [
           ('E-mail', Icons.email_outlined),
           ('PDF', Icons.picture_as_pdf_outlined),
+          ('Sistema', Icons.computer_outlined),
+        ],
+        paineis: [
+          tem ? painel([_email!]) : const Ct(),
+          tem ? painel([_pdf]) : const Ct(),
+          painel([if (tem) _geral, _inicializacao]),
+        ],
+      ),
+    );
+    final geral = Ct(
+      padding: const EdgeInsets.fromLTRB(0, 6, 0, 0),
+      child: Abas(
+        key: ValueKey('geral-$_geracao'),
+        secundaria: true,
+        aoMudar: aoMudar,
+        rotulos: const [
           ('Backup', Icons.backup_outlined),
           ('Cofre', Icons.lock_outlined),
           ('Atualizações', Icons.system_update_alt),
@@ -573,8 +598,6 @@ class ConfigState extends State<TelaConfig> {
           ('Logs', Icons.article_outlined),
         ],
         paineis: [
-          tem ? painel([_email!]) : const Ct(),
-          painel([_pdf]),
           painel([_banco, _protecao, _senhaMestra]),
           painel([_sincronizacao]),
           painel([_atualizacao]),
@@ -594,7 +617,7 @@ class ConfigState extends State<TelaConfig> {
           idLayout: 'TamanhosConfiguracoes.rotuloConfiguracoes',
         ),
         Expanded(
-          // Sem prestador, a tela abre em Avançado › Backup para permitir a restauração.
+          // Instalações sem prestador também podem acessar as configurações gerais.
           child: Abas(
             key: ValueKey('config-$_geracao'),
             inicial: tem ? 0 : 5,
@@ -605,8 +628,8 @@ class ConfigState extends State<TelaConfig> {
               ('Certificado', Icons.verified_user),
               ('Ambiente', Icons.tune),
               ('Personalização', Icons.palette_outlined),
+              ('Outros', Icons.more_horiz),
               ('Geral', Icons.settings_outlined),
-              ('Avançado', Icons.settings_suggest_outlined),
               ('Apoie este projeto', Icons.favorite_border),
             ],
             paineis: [
@@ -614,8 +637,8 @@ class ConfigState extends State<TelaConfig> {
               tem ? painel(_certificados) : const Ct(),
               tem ? painel([_ambiente!]) : const Ct(),
               painel([_personalizacao]),
-              painel([_geral]),
-              avancado,
+              outros,
+              geral,
               painel([_apoio]),
             ],
           ),
@@ -672,6 +695,7 @@ class _CartaoGeral extends _Cartao {
       try {
         ja<Object?>('banco.set_meta', {
           'chave': metaMinimizarAoFechar,
+          'prestador': app.prestador,
           'valor': ativado ? '1' : '0',
         });
         app.minimizarAoFechar = ativado;
@@ -696,6 +720,61 @@ class _CartaoGeral extends _Cartao {
       'Clique no ícone do Baiacu na bandeja para restaurar a janela. '
       'Para encerrar, clique com o botão direito no ícone e escolha Sair.',
     ),
+  ]);
+}
+
+class _CartaoInicializacao extends _Cartao {
+  _CartaoInicializacao(super.pai) {
+    unawaited(ler());
+  }
+
+  static const _janela = MethodChannel('baiacu/janela');
+  bool? _ativo;
+  bool _ocupado = false;
+
+  Future<void> ler() async {
+    if (!_vivo || _ocupado) return;
+    _ocupado = true;
+    try {
+      _ativo = await _janela.invokeMethod<bool>('inicializacaoAutomatica');
+    } catch (_) {
+      _ativo = null;
+    } finally {
+      _ocupado = false;
+      redesenhar();
+    }
+  }
+
+  void _mudar(bool? valor) {
+    app.exigirPermissao('config.geral', () async {
+      if (!_vivo || _ocupado) return;
+      _ocupado = true;
+      redesenhar();
+      try {
+        _ativo = await _janela.invokeMethod<bool>(
+          'definirInicializacaoAutomatica', valor == true,
+        );
+      } catch (e) {
+        if (_vivo) {
+          app.toast('Não foi possível salvar a inicialização automática. $e', erro: true);
+        }
+      } finally {
+        _ocupado = false;
+        redesenhar();
+      }
+    });
+  }
+
+  @override
+  Widget construir(BuildContext context) => _moldura([
+    _tituloCartao('Inicialização automática'),
+    Marcar(
+      idLayout: TamanhosConfiguracoes.marcarInicializacaoAutomatica.id,
+      valor: _ativo == true,
+      rotulo: 'Iniciar o programa ao ligar o computador',
+      aoMudar: _ativo == null || _ocupado ? null : _mudar,
+    ),
+    _nota('Abre o Baiacu ao entrar nesta conta do Windows.'),
   ]);
 }
 
@@ -2389,7 +2468,7 @@ class _CartaoAmbiente extends _Cartao {
 }
 
 // ------------------------------------------------------------------------------------------- //
-// Avançado › Emissão
+// Geral › Emissão
 class _CartaoEmissao extends _Cartao {
   _CartaoEmissao(super.pai) {
     final cfg = jaMapa('lotes.config_aviso');
@@ -2554,7 +2633,7 @@ class _CartaoEmissao extends _Cartao {
   ]);
 }
 
-// Avançado › Cofre: sincronização
+// Geral › Cofre: sincronização
 // ------------------------------------------------------------------------------------------- //
 class _CartaoSincronizacao extends _Cartao {
   _CartaoSincronizacao(super.pai) {
@@ -2566,13 +2645,6 @@ class _CartaoSincronizacao extends _Cartao {
       ],
     )..por(cfg['ambientes'] as String?);
     _auto = cfg['automatica'] == true;
-    _ddPrest = Suspensa(
-      opcoes: const [
-        Opcao('todos', 'Todos existentes'),
-        Opcao('atual', 'Prestador atual'),
-        Opcao('usuario', 'Prestadores do usuário'),
-      ],
-    )..por(cfg['prestadores'] as String?);
     _ddInt = Suspensa(
       opcoes: [
         for (final m in ja<List>('cofre.intervalos').cast<num>())
@@ -2587,14 +2659,13 @@ class _CartaoSincronizacao extends _Cartao {
       valores: [
         _lista(_ddAmb),
         _Valor(() => _auto, (v) => _auto = v as bool),
-        _lista(_ddPrest),
         _lista(_ddInt),
       ],
     );
     _situacao();
   }
 
-  late final Suspensa _ddAmb, _ddPrest, _ddInt;
+  late final Suspensa _ddAmb, _ddInt;
   late final _Edicao _edicao;
   late bool _auto;
   String _texto = '';
@@ -2602,7 +2673,6 @@ class _CartaoSincronizacao extends _Cartao {
   @override
   void descartar() {
     _ddAmb.dispose();
-    _ddPrest.dispose();
     _ddInt.dispose();
     super.descartar();
   }
@@ -2637,7 +2707,7 @@ class _CartaoSincronizacao extends _Cartao {
         'cfg': {
           'ambientes': _ddAmb.valor ?? 'atual',
           'automatica': _auto,
-          'prestadores': _ddPrest.valor ?? 'atual',
+          'prestadores': 'todos',
           'intervalo': int.tryParse(_ddInt.valor ?? '') ?? 60,
         },
       });
@@ -2658,7 +2728,7 @@ class _CartaoSincronizacao extends _Cartao {
     registrar('Sincronização do Cofre: ${_repr(novo)}');
     app.toast(
       'Sincronização do Cofre salva.'
-      '${ligou ? ' A primeira rodada automática começa em instantes.' : ''}',
+      '${ligou ? ' Ativada para todos os prestadores.' : ''}',
     );
     _situacao();
     redesenhar();
@@ -2684,14 +2754,6 @@ class _CartaoSincronizacao extends _Cartao {
             desabilitado: t,
             altura: TamanhosConfiguracoes.campoAmbientes.altura,
             idLayout: 'TamanhosConfiguracoes.campoAmbientes',
-          ),
-          ListaSuspensa(
-            estado: _ddPrest,
-            rotulo: 'Prestadores',
-            largura: TamanhosConfiguracoes.campoPrestadores.largura!,
-            desabilitado: t,
-            altura: TamanhosConfiguracoes.campoPrestadores.altura,
-            idLayout: 'TamanhosConfiguracoes.campoPrestadores',
           ),
         ],
         quebra: true,
@@ -2729,8 +2791,8 @@ class _CartaoSincronizacao extends _Cartao {
         '20 e 40 minutos e nada fica gravado pela metade.',
       ),
       _nota(
-        '"Todos os prestadores" = todos os que o usuário logado enxerga e que têm '
-        'certificado. Cada um é consultado no ambiente em uso DELE (ou nos dois).',
+        'A sincronização automática abrange todos os prestadores com certificado. '
+        'O botão Sincronizar consulta apenas o prestador em uso.',
       ),
       _nota(_texto),
       lin(_edicao.botoes(), idLayout: 'Grupo.config.lin.26'),
@@ -2739,7 +2801,7 @@ class _CartaoSincronizacao extends _Cartao {
 }
 
 // ------------------------------------------------------------------------------------------- //
-// Avançado › Backup: proteção do banco de notas
+// Geral › Backup: proteção do banco de notas
 // ------------------------------------------------------------------------------------------- //
 class _CartaoProtecao extends _Cartao {
   _CartaoProtecao(super.pai) {
@@ -2835,7 +2897,7 @@ class _CartaoProtecao extends _Cartao {
 }
 
 // ------------------------------------------------------------------------------------------- //
-// Avançado › PDF: preferência que vale na hora
+// Outros › PDF: preferência que vale na hora
 // ------------------------------------------------------------------------------------------- //
 class _CartaoPdf extends _Cartao {
   _CartaoPdf(super.pai) : _marcado = pai.app.pdfNativo;
@@ -2852,6 +2914,7 @@ class _CartaoPdf extends _Cartao {
     try {
       ja<Object?>('banco.set_meta', {
         'chave': _metaPdfNativo,
+        'prestador': app.prestador,
         'valor': marcado ? '1' : '0',
       });
     } catch (e) {
@@ -3447,7 +3510,7 @@ class _CartaoPersonalizacao extends _Cartao {
 }
 
 // ------------------------------------------------------------------------------------------- //
-// Avançado › Backup: backup e restauração em .zip e a troca da senha mestra
+// Geral › Backup: backup e restauração em .zip e a troca da senha mestra
 // ------------------------------------------------------------------------------------------- //
 class _CartaoBanco extends _Cartao {
   _CartaoBanco(super.pai) {
@@ -4287,7 +4350,7 @@ class _CartaoAtualizacao extends _Cartao {
 }
 
 // ------------------------------------------------------------------------------------------- //
-// Avançado › Emissão: tabelas tributárias do IBS/CBS (cClassTrib e Anexo VIII)
+// Geral › Emissão: tabelas tributárias do IBS/CBS (cClassTrib e Anexo VIII)
 // ------------------------------------------------------------------------------------------- //
 class _CartaoTabelas extends _Cartao {
   _CartaoTabelas(super.pai) {
@@ -4380,7 +4443,7 @@ class _CartaoTabelas extends _Cartao {
 }
 
 // ------------------------------------------------------------------------------------------- //
-// Avançado › Logs: espaço máximo, prazo e máscara; exportação para o suporte
+// Geral › Logs: espaço máximo, prazo e máscara; exportação para o suporte
 // ------------------------------------------------------------------------------------------- //
 class _CartaoLogs extends _Cartao {
   _CartaoLogs(super.pai) {

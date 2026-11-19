@@ -241,10 +241,14 @@ void copiar(
   App app,
   String texto, {
   String aviso = 'Copiado para a área de transferência.',
+  void Function()? aoCopiar,
 }) {
   if (texto.isEmpty) return;
   Clipboard.setData(ClipboardData(text: texto)).then(
-    (_) => app.toast(aviso),
+    (_) {
+      aoCopiar?.call();
+      app.toast(aviso);
+    },
     onError: (Object e) {
       registrar(
         'Falha ao copiar para a área de transferência: $e',

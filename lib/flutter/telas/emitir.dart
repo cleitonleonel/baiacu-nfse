@@ -12,6 +12,7 @@ import '../app/app.dart';
 import '../app/correio.dart';
 import '../app/doacao.dart';
 import '../app/sistema.dart';
+import '../app/xml_ilegivel.dart';
 import '../kit/campo.dart';
 import '../kit/flet.dart';
 import '../kit/formatos.dart';
@@ -631,6 +632,19 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
         'XML da NFS-e a substituir ($chave) não pôde ser lido: $e',
         nivel: 'error',
       );
+      // Sem o XML da original, os campos que a SEFIN não deixa mudar (E0060) ficariam de fora:
+      // primeiro a busca de novo na SEFIN, depois a substituição recomeça.
+      final id = notaComXmlIlegivel(e);
+      if (id != null) {
+        oferecerRebusca(
+          app,
+          dono: app.prestador,
+          notaId: id,
+          rotulo: 'NFS-e nº ${rec['nNFSe'] ?? '?'}',
+          aoRecuperar: () => _iniciarSubstituicao(rec, cMotivo, xMotivo),
+        );
+        return;
+      }
       imut = [];
     }
     final doc = soDoc((rec['tomador'] as String?) ?? '');
@@ -2103,6 +2117,11 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
           } else {
             _mostrarFalhaTransmissao(e, dados, ctx, form);
           }
+        } else if (e.tipo == 'SubstituicaoPendente') {
+          app.toastFim(ht, '$e', aviso: true);
+          app.refazerAvisoFila?.call();
+          app.notasMudaram();
+          if (sub != null) _limparSubstSeFor(sub['chave'] as String);
         } else if (e.tipo == 'EmissionRejected') {
           app.toastFim(
             ht,
@@ -2158,29 +2177,15 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
         '[$op] NFS-e emitida: nº $numero chave ${chaveNova.isEmpty ? '?' : chaveNova} '
         '(prestador=$prest tomador=$tom serviço=$serv)',
       );
+      final cofrePendente = resultado['subst_cofre_pendente'] == true;
       if (sub != null) {
-        try {
-          ja<Object?>('emissao.marcar_substituida', {
-            'prestador': prest,
-            'chave_antiga': sub['chave'],
-            'chave_nova': chaveNova,
-          });
-          registrar(
-            '[$op] NFS-e nº ${sub['nNFSe']} SUBSTITUÍDA pela chave '
-            '${chaveNova.isEmpty ? '?' : chaveNova}',
-          );
-        } catch (e) {
-          registrar(
-            '[$op] Falha ao marcar a NFS-e antiga como substituída: $e',
-            nivel: 'error',
-          );
-        }
         _limparSubstSeFor(sub['chave'] as String);
       }
       app.toastFim(
         ht,
         'NFS-e nº $numero ($amb) emitida para $nome.'
-        '${sub != null ? ' A nº ${sub['nNFSe']} foi substituída.' : ''}',
+        '${sub == null ? '' : cofrePendente ? ' Substituição da nº ${sub['nNFSe']} autorizada na SEFIN. Atualização do Cofre pendente.' : ' A nº ${sub['nNFSe']} foi substituída.'}',
+        aviso: cofrePendente,
       );
       app.notasMudaram(); // nova nota: Consulta e Cofre recarregam ao abrir
       // Primeira NFS-e em produção: a janela de doação com fogos, uma vez só, depois de fechar o
@@ -2273,19 +2278,6 @@ class EmitirState extends State<TelaEmitir> with TelaGuardada<TelaEmitir> {
       return;
     }
     if (sub != null) {
-      // A nota nova FOI aceita (chave existe): a antiga já pode ser marcada.
-      try {
-        ja<Object?>('emissao.marcar_substituida', {
-          'prestador': ctx.prest,
-          'chave_antiga': sub['chave'],
-          'chave_nova': chave,
-        });
-      } catch (e) {
-        registrar(
-          '[${ctx.op}] Falha ao marcar a NFS-e antiga como substituída: $e',
-          nivel: 'error',
-        );
-      }
       _limparSubstSeFor(sub['chave'] as String);
     }
     registrar(

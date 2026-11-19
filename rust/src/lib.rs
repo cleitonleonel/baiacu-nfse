@@ -16,6 +16,7 @@ pub mod certificado;
 pub mod chaves;
 pub mod clientes_planilha;
 pub mod cofre;
+mod contexto_cliente;
 pub mod config_dps;
 pub mod consulta;
 pub mod correio;

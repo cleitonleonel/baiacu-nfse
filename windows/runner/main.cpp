@@ -4,10 +4,26 @@
 #include <shellapi.h>
 
 #include <string>
+#include <optional>
 
 #include "flutter_window.h"
 #include "utils.h"
 #include "startup_guard.h"
+
+namespace {
+// O serviço coordena as operações no banco e dá uma sessão própria a cada cliente.
+bool UsaServicoDeDados(const std::wstring& pasta) {
+  if (GetFileAttributesW((pasta + L"\\installed.marker").c_str()) == INVALID_FILE_ATTRIBUTES) {
+    return false;
+  }
+  SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+  if (!scm) return false;
+  SC_HANDLE dados = OpenServiceW(scm, L"BaiacuNFSeDados", SERVICE_QUERY_STATUS);
+  if (dados) CloseServiceHandle(dados);
+  CloseServiceHandle(scm);
+  return dados != nullptr;
+}
+}  // namespace
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
@@ -88,15 +104,19 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // que não registra serviços), o programa abre no modelo anterior: os bancos de ProgramData são
   // abertos no próprio processo. O núcleo decide isso sozinho (dados_windows::servico_registrado).
   // Bloquear aqui fazia a conferência de partida do atualizador falhar e a atualização ser desfeita.
-  StartupGuard starting;
+  const bool banco_local = !probe && !UsaServicoDeDados(directory);
+  StartupGuard starting(banco_local);
   if (starting.duplicate()) return EXIT_SUCCESS;
   wchar_t reabrir_env[8] = {};
   const bool reabrir = GetEnvironmentVariableW(L"NFSE_REABRIR", reabrir_env, 8) > 0 && reabrir_env[0] == L'1';
   SetEnvironmentVariableW(L"NFSE_REABRIR", nullptr);
-  MachineGuard machine(reabrir ? 20000 : 0);
-  if (machine.busy()) {
-    if (!oculta) MachineGuard::Warn();
-    return EXIT_SUCCESS;
+  std::optional<MachineGuard> machine;
+  if (banco_local) {
+    machine.emplace(reabrir ? 20000 : 0);
+    if (machine->busy()) {
+      if (!oculta) MachineGuard::Warn();
+      return EXIT_SUCCESS;
+    }
   }
   // As DLLs do programa (Flutter, plugins, nucleo e Visual C++) moram em data\dll, nao ao lado do
   // executavel. O Windows tem de saber disso antes de a primeira delas ser pedida.
@@ -120,7 +140,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   // Os arquivos de execucao do Flutter ficam em "data" (app.so, icudtl.dat, flutter_assets).
   // Os bancos do usuario ficam em "database" (dados.db, dados.key, notas.db).
-  flutter::DartProject project(L"data");
+  flutter::DartProject project(directory + L"\\data");
   // Skia evita a inicializacao lenta do Impeller neste aplicativo Windows.
   project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
 

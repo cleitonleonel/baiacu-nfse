@@ -103,7 +103,16 @@ pub fn executar(metodo: &str, a: &Value) -> Option<Res<Value>> {
         })(),
 
         // ---- prestadores -------------------------------------------------------------- //
-        "cadastro.list_prestadores" => cadastro::list_prestadores().and_then(js),
+        "cadastro.list_prestadores" => (|| {
+            let operador = crate::permissoes::operador_atual()?;
+            let mut lista = cadastro::list_prestadores()?;
+            if !operador.is_master() {
+                let permitidos = crate::usuarios::prestadores_permitidos(&operador)?;
+                lista.retain(|p| permitidos.contains(&p.documento));
+            }
+            js(lista)
+        })(),
+        "cadastro.list_prestadores_para_vincular" => cadastro::list_prestadores().and_then(js),
         "cadastro.ultimo_prestador" => {
             (|| js(cadastro::ultimo_prestador(inteiro(a, "usuario_id")?)?))()
         }

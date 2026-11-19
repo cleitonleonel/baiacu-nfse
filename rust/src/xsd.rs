@@ -29,9 +29,14 @@ struct XmlError {
 }
 
 type Tratador = unsafe extern "C" fn(*mut c_void, *mut XmlError);
+/// `xmlExternalEntityLoader`: (URL, ID público, contexto) -> entrada do parser.
+type Carregador = unsafe extern "C" fn(*const c_char, *const c_char, *mut c_void) -> *mut c_void;
 
 unsafe extern "C" {
     fn xmlInitParser();
+    fn xmlGetExternalEntityLoader() -> Option<Carregador>;
+    fn xmlSetExternalEntityLoader(f: Option<Carregador>);
+    fn xmlGetIntSubset(doc: *const c_void) -> *mut c_void;
     fn xmlSetStructuredErrorFunc(ctx: *mut c_void, handler: Option<Tratador>);
     fn xmlReadFile(url: *const c_char, encoding: *const c_char, options: c_int) -> *mut c_void;
     fn xmlReadMemory(
@@ -62,8 +67,38 @@ unsafe extern "C" {
 }
 
 // As opções com que o programa sempre leu XML (as da lxml): entidades resolvidas, CDATA como
-// texto, sem rede, nós compactos, linhas além de 65535.
+// texto, sem rede, nós compactos, linhas além de 65535. Valem para os XSD do próprio Baiacu.
 const OPCOES: c_int = 2 | (1 << 14) | (1 << 11) | (1 << 16) | (1 << 22);
+const XML_PARSE_NOENT: c_int = 2;
+// O documento validado vem de fora (tela, fila, lote): as entidades NÃO são resolvidas. Sem DTD,
+// que a DPS não tem, o resultado é o mesmo; com DTD, nada de arquivo ou endereço é lido.
+const OPCOES_DOCUMENTO: c_int = OPCOES & !XML_PARSE_NOENT;
+
+const SEM_DTD: &str = "O XML não pode trazer declaração DOCTYPE nem entidades: a DPS não usa esse recurso.";
+
+/// Durante a leitura e a validação do documento, qualquer pedido de arquivo ou endereço externo
+/// é recusado. Os XSD continuam carregando os vizinhos pelo carregador padrão.
+unsafe extern "C" fn recusar_externo(
+    _url: *const c_char,
+    _id: *const c_char,
+    _ctxt: *mut c_void,
+) -> *mut c_void {
+    std::ptr::null_mut()
+}
+
+/// O documento tem DOCTYPE/ENTITY no começo? Confere o texto em UTF-8 e em UTF-16 (a libxml2
+/// aceita os dois); o que escapar daqui ainda cai no `xmlGetIntSubset` depois da leitura.
+fn tem_dtd(xml: &[u8]) -> bool {
+    let procura = |agulha: &[u8]| xml.windows(agulha.len()).any(|j| j == agulha);
+    let utf16 = |t: &str, le: bool| -> Vec<u8> {
+        t.encode_utf16()
+            .flat_map(|u| if le { u.to_le_bytes() } else { u.to_be_bytes() })
+            .collect()
+    };
+    ["<!DOCTYPE", "<!ENTITY"].iter().any(|t| {
+        procura(t.as_bytes()) || procura(&utf16(t, true)) || procura(&utf16(t, false))
+    })
+}
 
 /// Um apontamento do validador.
 #[derive(Debug, Clone, PartialEq)]
@@ -200,23 +235,33 @@ impl Cache {
     }
 
     fn validar(&mut self, xsd: &Path, xml: &[u8]) -> Res<Vec<Apontamento>> {
+        if tem_dtd(xml) {
+            return Err(Erro::valor(SEM_DTD));
+        }
         let esquema = self.esquema(xsd)?;
         let mut erros: Vec<Apontamento> = Vec::new();
         let dados = &mut erros as *mut Vec<Apontamento> as *mut c_void;
-        unsafe {
+        let tamanho = c_int::try_from(xml.len()).map_err(|_| Erro::valor("XML grande demais."))?;
+        // Toda a libxml2 roda nesta linha de execução: trocar o carregador aqui não afeta
+        // ninguém, e ele volta ao padrão antes de qualquer XSD ser lido de novo.
+        let padrao = unsafe { xmlGetExternalEntityLoader() };
+        unsafe { xmlSetExternalEntityLoader(Some(recusar_externo)) };
+        let resultado = (|| unsafe {
             xmlSetStructuredErrorFunc(dados, Some(recolher));
-            let tamanho =
-                c_int::try_from(xml.len()).map_err(|_| Erro::valor("XML grande demais."))?;
             let doc = xmlReadMemory(
                 xml.as_ptr() as *const c_char,
                 tamanho,
                 std::ptr::null(),
                 std::ptr::null(),
-                OPCOES,
+                OPCOES_DOCUMENTO,
             );
             xmlSetStructuredErrorFunc(std::ptr::null_mut(), None);
             if doc.is_null() {
                 return Err(Erro::valor(format!("XML inválido: {}", primeira(&erros))));
+            }
+            if !xmlGetIntSubset(doc).is_null() {
+                xmlFreeDoc(doc);
+                return Err(Erro::valor(SEM_DTD));
             }
             erros.clear();
             let ctxt = xmlSchemaNewValidCtxt(esquema);
@@ -234,8 +279,10 @@ impl Cache {
             if r == 0 {
                 erros.clear();
             }
-        }
-        Ok(erros)
+            Ok(())
+        })();
+        unsafe { xmlSetExternalEntityLoader(padrao) };
+        resultado.map(|()| erros)
     }
 }
 
@@ -272,5 +319,72 @@ fn carregar(xsd: &Path) -> Res<Esquema> {
             )));
         }
         Ok(Esquema { esquema, doc })
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    const PRINCIPAL: &str = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:include schemaLocation="tipos.xsd"/>
+  <xs:element name="DPS" type="TNumero"/>
+</xs:schema>"#;
+    const TIPOS: &str = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="TNumero"><xs:restriction base="xs:int"/></xs:simpleType>
+</xs:schema>"#;
+
+    fn pasta() -> PathBuf {
+        let p = std::env::temp_dir().join(format!("baiacu_xsd_{}", std::process::id()));
+        std::fs::create_dir_all(p.join("esquemas com espaço")).unwrap();
+        p
+    }
+
+    #[test]
+    fn documento_nao_le_arquivo_nem_endereco_externo() {
+        let raiz = pasta();
+        let dir = raiz.join("esquemas com espaço");
+        std::fs::write(dir.join("principal.xsd"), PRINCIPAL).unwrap();
+        std::fs::write(dir.join("tipos.xsd"), TIPOS).unwrap();
+        let segredo = raiz.join("segredo.txt");
+        std::fs::write(&segredo, "SEGREDO123").unwrap();
+        std::fs::write(raiz.join("segredo.dtd"), "<!ENTITY vaza \"SEGREDO123\">").unwrap();
+        let xsd = dir.join("principal.xsd");
+        let url = |nome: &str| format!("file:///{}", raiz.join(nome).display()).replace('\\', "/");
+
+        // O XSD com include carrega e valida normalmente.
+        assert!(validar(&xsd, b"<DPS>12</DPS>").unwrap().is_empty());
+        let ruim = validar(&xsd, b"<DPS>abc</DPS>").unwrap();
+        assert!(ruim.iter().any(|a| a.mensagem.contains("abc")), "{ruim:?}");
+
+        let ataques = [
+            format!(r#"<!DOCTYPE DPS [<!ENTITY e SYSTEM "{}">]><DPS>&e;</DPS>"#, url("segredo.txt")),
+            format!(r#"<?xml version="1.0"?><!DOCTYPE DPS [<!ENTITY % p SYSTEM "{}"> %p;]><DPS>&vaza;</DPS>"#, url("segredo.dtd")),
+            format!(r#"<!DOCTYPE DPS SYSTEM "{}"><DPS>1</DPS>"#, url("segredo.dtd")),
+            r#"<!DOCTYPE DPS [<!ENTITY e SYSTEM "http://127.0.0.1:9/x">]><DPS>&e;</DPS>"#.to_string(),
+            r#"<!DOCTYPE DPS [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]><DPS>&b;</DPS>"#.to_string(),
+        ];
+        for ataque in &ataques {
+            let e = validar(&xsd, ataque.as_bytes()).unwrap_err();
+            assert_eq!(e.msg, SEM_DTD, "{ataque}");
+        }
+        // O mesmo em UTF-16 (com BOM), que a libxml2 também aceita.
+        let mut utf16 = vec![0xFF, 0xFE];
+        utf16.extend(ataques[0].encode_utf16().flat_map(u16::to_le_bytes));
+        let e = validar(&xsd, &utf16).unwrap_err();
+        assert!(!e.msg.contains("SEGREDO"), "{}", e.msg);
+
+        // Depois das recusas, um XSD relido (a pasta mudou) volta a carregar os vizinhos.
+        std::fs::write(dir.join("tipos.xsd"), format!("{TIPOS}\n")).unwrap();
+        assert!(validar(&xsd, b"<DPS>7</DPS>").unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[test]
+    fn dtd_detectada_em_utf8_e_utf16() {
+        assert!(tem_dtd(b"<?xml version='1.0'?><!DOCTYPE x><x/>"));
+        let be: Vec<u8> = "<!ENTITY".encode_utf16().flat_map(u16::to_be_bytes).collect();
+        assert!(tem_dtd(&be));
+        assert!(!tem_dtd(b"<DPS xmlns=\"http://www.sped.fazenda.gov.br/nfse\"><a>&amp;</a></DPS>"));
     }
 }

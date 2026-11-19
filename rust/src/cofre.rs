@@ -1075,11 +1075,131 @@ pub fn marcar_cancelada(dono: &str, chave: &str, evento_xml: Option<&[u8]>) -> R
 /// fica cancelada e apontando para a substituta. Idempotente.
 pub fn marcar_substituida(dono: &str, chave_antiga: &str, chave_nova: &str) -> Res<()> {
     let con = conn()?;
-    con.execute(
-        "UPDATE nota SET cancelada=1, subst_por=?1 WHERE dono=?2 AND chave=?3",
+    let atualizadas = con.execute(
+        "UPDATE nota SET cancelada=1, subst_por=?1 WHERE dono=?2 AND chave=?3 \
+         AND subst_por IN ('', ?1)",
         params![chave_nova, so_doc(dono), chave_antiga],
     )?;
+    if atualizadas == 0 {
+        return Err(erro("A nota antiga está ausente do Cofre ou já aponta para outra substituta."));
+    }
     Ok(())
+}
+
+// --------------------------------------------------------------------------------------------- //
+// Substituição autorizada na SEFIN com o Cofre sem gravar
+// --------------------------------------------------------------------------------------------- //
+// Quando a SEFIN autoriza a substituta, ela mesma cancela a nota antiga (evento e105102): falta
+// só o Cofre refletir isso. Se a marca não gravar, a pendência fica no dados.db (outro arquivo)
+// e é refeita ao abrir o programa, ao abrir o Dashboard e ao fim de cada sincronização. Nada é
+// retransmitido: a DPS já virou NFS-e.
+
+fn guardar_pendencia_subst(dono: &str, antiga: &str, nova: &str, motivo: &str) -> Res<()> {
+    banco::conn()?.execute(
+        "INSERT INTO subst_pendente (prestador, chave_antiga, chave_nova, criado, erro) \
+         VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(prestador, chave_antiga) DO UPDATE SET \
+         chave_nova = excluded.chave_nova, erro = excluded.erro",
+        params![dono, antiga, nova, agora(), motivo],
+    )?;
+    Ok(())
+}
+
+/// Marca `antiga` como substituída por `nova` depois do aceite da SEFIN. true = o Cofre gravou;
+/// false = ficou pendente e será refeito sozinho. Erro só se nem a pendência puder ser guardada.
+pub fn concluir_substituicao(dono: &str, antiga: &str, nova: &str) -> Res<bool> {
+    let dono = so_doc(dono);
+    let (antiga, nova) = (aparar(antiga), aparar(nova));
+    if antiga.is_empty() || nova.is_empty() {
+        return Err(erro("A substituição veio sem a chave de acesso de uma das notas."));
+    }
+    match marcar_substituida(&dono, antiga, nova) {
+        Ok(()) => {
+            if let Ok(con) = banco::conn() {
+                let _ = con.execute(
+                    "DELETE FROM subst_pendente WHERE prestador = ?1 AND chave_antiga = ?2 AND chave_nova = ?3",
+                    params![dono, antiga, nova],
+                );
+            }
+            Ok(true)
+        }
+        Err(e) => {
+            registro::erro(
+                "cofre",
+                &format!(
+                    "Substituição de {antiga} por {nova} autorizada na SEFIN; a atualização do Cofre ficou pendente: {e}"
+                ),
+            );
+            guardar_pendencia_subst(&dono, antiga, nova, &e.msg).map_err(|e2| {
+                erro(format!(
+                    "A substituição foi autorizada na SEFIN, mas o Cofre não gravou ({e}) e a pendência também não pôde ser guardada ({e2}). Use Sincronizar no Cofre para trazer o evento oficial."
+                ))
+            })?;
+            Ok(false)
+        }
+    }
+}
+
+/// Refaz as marcas pendentes do dono. Devolve quantas continuam pendentes.
+pub fn reconciliar_substituicoes(dono: &str) -> Res<usize> {
+    let dono = so_doc(dono);
+    let pendentes: Vec<(String, String)> = {
+        let con = banco::conn()?;
+        let mut st = con.prepare(
+            "SELECT chave_antiga, chave_nova FROM subst_pendente WHERE prestador = ?1 ORDER BY criado",
+        )?;
+        let it = st.query_map([&dono], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        it.collect::<Result<_, _>>()?
+    };
+    let mut restam = 0;
+    for (antiga, nova) in pendentes {
+        match marcar_substituida(&dono, &antiga, &nova) {
+            Ok(()) => {
+                banco::conn()?.execute(
+                    "DELETE FROM subst_pendente WHERE prestador = ?1 AND chave_antiga = ?2 AND chave_nova = ?3",
+                    params![dono, antiga, nova],
+                )?;
+                registro::info(
+                    "cofre",
+                    &format!("Substituição de {antiga} por {nova} atualizada no Cofre."),
+                );
+            }
+            Err(e) => {
+                restam += 1;
+                banco::conn()?.execute(
+                    "UPDATE subst_pendente SET erro = ?4 WHERE prestador = ?1 AND chave_antiga = ?2 AND chave_nova = ?3",
+                    params![dono, antiga, nova, e.msg],
+                )?;
+            }
+        }
+    }
+    Ok(restam)
+}
+
+/// Substituições autorizadas na SEFIN que o Cofre ainda não refletiu (depois de tentar de novo).
+pub fn substituicoes_pendentes(dono: &str) -> Res<Value> {
+    reconciliar_substituicoes(dono)?;
+    let con = banco::conn()?;
+    let mut st = con.prepare(
+        "SELECT chave_antiga, chave_nova, criado, erro FROM subst_pendente WHERE prestador = ?1 ORDER BY criado",
+    )?;
+    let it = st.query_map([so_doc(dono)], |r| {
+        Ok(json!({
+            "chave_antiga": r.get::<_, String>(0)?,
+            "chave_nova": r.get::<_, String>(1)?,
+            "criado": r.get::<_, String>(2)?,
+            "erro": r.get::<_, String>(3)?,
+        }))
+    })?;
+    let mut pendentes = it.collect::<Result<Vec<_>, _>>()?;
+    for p in crate::emissao::list_pendentes(dono)? {
+        if !p.subst_chave.is_empty() && !pendentes.iter().any(|v| v["chave_antiga"] == p.subst_chave) {
+            pendentes.push(json!({
+                "chave_antiga": p.subst_chave, "chave_nova": p.chave,
+                "criado": p.criado_em, "erro": p.ultimo_erro, "aguarda_conferencia": true,
+            }));
+        }
+    }
+    Ok(Value::Array(pendentes))
 }
 
 /// [(chave antiga, chave da substituta)] de todas as notas substituídas do dono.
@@ -1673,6 +1793,14 @@ pub fn sincronizar(
             stats.fim
         ),
     );
+    if http.is_none() && stats.fim != "cancelado"
+        && let Err(e) = crate::emissao::recuperar_substituicoes_enfileiradas(&dono, Some(&amb))
+    {
+        registro::aviso("cofre", &format!("A conferência das DPS de substituição ficou pendente: {e}"));
+    }
+    if let Err(e) = reconciliar_substituicoes(&dono) {
+        registro::aviso("cofre", &format!("Substituições pendentes de {dono} não puderam ser atualizadas: {e}"));
+    }
     Ok(stats)
 }
 
@@ -1953,6 +2081,43 @@ pub fn marcar_automatica(quando: Option<i64>) {
             &format!("Falha ao registrar o horário da sincronização automática: {e}"),
         );
     }
+}
+
+/// Executa a rodada configurada para toda a instalação, com alvos escolhidos pelo núcleo.
+pub(crate) fn sincronizar_automatica(acompanhar: &Acompanhar<'_>) -> Res<Value> {
+    static RODADA: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let Ok(_rodada) = RODADA.try_lock() else {
+        return Ok(json!({"rodou": false}));
+    };
+    let mut cfg = config();
+    let ultima = ultima_automatica();
+    if !cfg.automatica || (epoca() as f64) < ultima + cfg.intervalo as f64 * 60.0 {
+        return Ok(json!({"rodou": false, "ultima": ultima}));
+    }
+    cfg.prestadores = "todos".into();
+    let mut docs = Vec::new();
+    for p in crate::cadastro::list_prestadores()? {
+        if crate::cadastro::active_cert(&p.documento).is_ok_and(|cert| !cert.is_empty()) {
+            docs.push(p.documento);
+        }
+    }
+    let pares = alvos(&cfg, "", &docs, &|d| {
+        crate::cadastro::get_ambiente(d).unwrap_or_else(|_| AMB_PRODUCAO.into())
+    });
+    if pares.is_empty() {
+        marcar_automatica(None);
+        return Ok(json!({"rodou": false, "ultima": ultima_automatica()}));
+    }
+    let resultado = sincronizar_varios(&pares, None, acompanhar, false)?;
+    let sem_rede = resultado["sem_rede"].as_str().is_some_and(|s| !s.is_empty());
+    let cancelado = resultado["cancelado"] == true;
+    if !sem_rede && !cancelado {
+        marcar_automatica(None);
+    }
+    Ok(json!({
+        "rodou": true, "sem_rede": sem_rede, "cancelado": cancelado,
+        "ultima": ultima_automatica(),
+    }))
 }
 
 /// Sincroniza vários (prestador, ambiente), um de cada vez. Um erro num deles (sem certificado,
@@ -2585,6 +2750,7 @@ pub struct Nota {
     pub dhProc: String,
     pub dt: String,
     pub dCompet: String,
+    pub movimento: String,
     pub emit_doc: String,
     pub emit_nome: String,
     pub toma_doc: String,
@@ -2624,7 +2790,17 @@ impl Nota {
     }
 }
 
-const COLUNAS: [&str; 18] = [
+pub(crate) fn coluna_de_data(competencia: bool, movimento: bool) -> &'static str {
+    if movimento {
+        "COALESCE(date(NULLIF(entrou, 0), 'unixepoch', 'localtime'), '')"
+    } else if competencia {
+        "dCompet"
+    } else {
+        "dt"
+    }
+}
+
+const COLUNAS: [&str; 19] = [
     "id",
     "chave",
     "papel",
@@ -2643,6 +2819,7 @@ const COLUNAS: [&str; 18] = [
     "subst_por",
     "origem",
     "dCompet",
+    "entrou",
 ];
 const OUTRO_DOC: &str = "(CASE papel WHEN 'E' THEN toma_doc ELSE emit_doc END)";
 
@@ -2674,6 +2851,14 @@ fn ordem_sql(coluna: &str) -> &'static str {
 }
 
 fn nota_da_linha(r: &rusqlite::Row) -> rusqlite::Result<Nota> {
+    let entrou: i64 = r.get(18)?;
+    let movimento = if entrou == 0 {
+        String::new()
+    } else {
+        chrono::DateTime::from_timestamp(entrou, 0)
+            .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%dT%H:%M:%S").to_string())
+            .unwrap_or_default()
+    };
     Ok(Nota {
         id: r.get(0)?,
         chave: r.get(1)?,
@@ -2693,6 +2878,7 @@ fn nota_da_linha(r: &rusqlite::Row) -> rusqlite::Result<Nota> {
         subst_por: r.get(15)?,
         origem: r.get(16)?,
         dCompet: r.get(17)?,
+        movimento,
     })
 }
 
@@ -2704,6 +2890,7 @@ pub struct Filtro {
     pub amb: String,
     /// Datas ISO ('AAAA-MM-DD'); vazio = sem limite.
     pub por_competencia: bool,
+    pub por_movimento: bool,
     pub ini: String,
     pub fim: String,
     /// A busca das telas de notas — regra única em `busca`.
@@ -2733,7 +2920,7 @@ pub fn listar(dono: &str, f: &Filtro) -> Res<(Vec<Nota>, i64, f64)> {
             args.push(json!(valor));
         }
     }
-    let data = if f.por_competencia { "dCompet" } else { "dt" };
+    let data = coluna_de_data(f.por_competencia, f.por_movimento);
     if !f.ini.is_empty() {
         onde.push(format!("{data} >= ?"));
         args.push(json!(f.ini));
@@ -2775,7 +2962,7 @@ pub fn listar(dono: &str, f: &Filtro) -> Res<(Vec<Nota>, i64, f64)> {
             "coalesce(g.nome, '') COLLATE NOCASE",
         )
     } else {
-        (String::new(), if coluna == "data" && f.por_competencia { "dCompet" } else { ordem_sql(&coluna) })
+        (String::new(), if coluna == "data" && f.por_movimento { "entrou" } else if coluna == "data" && f.por_competencia { "dCompet" } else { ordem_sql(&coluna) })
     };
     let mut ordenar = format!(
         "{expr} {}, nota.id DESC",
@@ -2836,6 +3023,10 @@ pub fn listar(dono: &str, f: &Filtro) -> Res<(Vec<Nota>, i64, f64)> {
 
 pub fn nota_por_id(nota_id: i64) -> Res<Option<Nota>> {
     let con = conn()?;
+    nota_por_id_em(&con, nota_id)
+}
+
+fn nota_por_id_em(con: &Connection, nota_id: i64) -> Res<Option<Nota>> {
     Ok(con
         .query_row(
             &format!("SELECT {} FROM nota WHERE id=?1", COLUNAS.join(", ")),
@@ -2843,6 +3034,29 @@ pub fn nota_por_id(nota_id: i64) -> Res<Option<Nota>> {
             nota_da_linha,
         )
         .optional()?)
+}
+
+fn com_nota_da_sessao<T>(
+    id: i64,
+    ler: impl FnOnce(&Connection, i64) -> Res<T>,
+) -> Res<Option<T>> {
+    let mut con = conn()?;
+    let tx = con.transaction()?;
+    let dono: Option<String> = tx
+        .query_row("SELECT dono FROM nota WHERE id=?1", [id], |r| r.get(0))
+        .optional()?;
+    let Some(dono) = dono else { return Ok(None) };
+    crate::permissoes::exigir_prestador_da_sessao(&dono)?;
+    Ok(Some(ler(&tx, id)?))
+}
+
+pub(crate) fn nota_por_id_da_sessao(id: i64) -> Res<Option<Nota>> {
+    Ok(com_nota_da_sessao(id, nota_por_id_em)?.flatten())
+}
+
+pub(crate) fn xml_da_nota_da_sessao(id: i64) -> Res<Vec<u8>> {
+    com_nota_da_sessao(id, xml_da_nota_em)?
+        .ok_or_else(|| erro("O XML desta nota não está no banco de notas."))
 }
 
 pub fn nota_por_chave(dono: &str, chave: &str) -> Res<Option<Nota>> {
@@ -2969,8 +3183,20 @@ impl LeitorXml {
 }
 
 fn xml_da_nota_em(con: &Connection, nota_id: i64) -> Res<Vec<u8>> {
-    xml_disponivel_em(con, nota_id)?
-        .ok_or_else(|| erro("O XML desta nota não está no banco de notas."))
+    xml_disponivel_em(con, nota_id)?.ok_or_else(|| {
+        marcar_ilegivel(erro("O XML desta nota não está no banco de notas."), nota_id)
+    })
+}
+
+/// O XML da nota não abre (ou sumiu) e a linha dela existe: a tela pode oferecer buscar de novo
+/// na SEFIN (`emissao::rebuscar_nfse`).
+fn marcar_ilegivel(e: Erro, nota_id: i64) -> Erro {
+    e.com_dados(json!({ "xml_ilegivel": true, "nota_id": nota_id }))
+}
+
+/// O erro é de um XML guardado que não abre (ou sumiu)?
+pub fn e_xml_ilegivel(e: &Erro) -> bool {
+    e.dado("xml_ilegivel").as_bool() == Some(true)
 }
 
 pub(crate) fn xml_disponivel_em(con: &Connection, nota_id: i64) -> Res<Option<Vec<u8>>> {
@@ -2982,8 +3208,64 @@ pub(crate) fn xml_disponivel_em(con: &Connection, nota_id: i64) -> Res<Option<Ve
         )
         .optional()?;
     linha
-        .map(|(sha_gravado, certs, molde, dados)| abrir(con, &sha_gravado, &certs, molde, &dados))
+        .map(|(sha_gravado, certs, molde, dados)| {
+            abrir(con, &sha_gravado, &certs, molde, &dados).map_err(|e| marcar_ilegivel(e, nota_id))
+        })
         .transpose()
+}
+
+/// Troca o XML de uma nota cujo XML guardado não abre (ou sumiu) pelo XML oficial buscado de
+/// novo. A chave e o ambiente precisam ser os da nota; o guardado só é trocado se continuar
+/// ilegível; a gravação é relida e comparada antes de valer. 'trocado' | 'ja_legivel'.
+pub fn trocar_xml_ilegivel(dono: &str, nota_id: i64, xml_bytes: &[u8]) -> Res<&'static str> {
+    let dono = so_doc(dono);
+    let Some(info) = ler_nfse(xml_bytes).filter(|i| !i.chave.is_empty()) else {
+        return Err(erro("A SEFIN não devolveu uma NFS-e com os campos de identificação."));
+    };
+    let con = conn()?;
+    let geracao = geracao_de(&dono);
+    let resultado = transacao(&con, || {
+        conferir_geracao(&dono, Some(geracao))?;
+        let linha: Option<(String, String, String, String)> = con
+            .query_row(
+                "SELECT dono, chave, amb, papel FROM nota WHERE id=?1",
+                [nota_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()?;
+        let Some((dono_nota, chave, amb, papel)) = linha else {
+            return Err(erro("Esta nota não está mais no banco de notas."));
+        };
+        if dono_nota != dono {
+            return Err(erro("Esta nota pertence a outro prestador."));
+        }
+        if info.chave != chave || (!info.amb.is_empty() && info.amb != amb) {
+            return Err(erro(
+                "A SEFIN devolveu uma NFS-e diferente da guardada (chave ou ambiente). O XML guardado não foi trocado.",
+            ));
+        }
+        match xml_disponivel_em(&con, nota_id) {
+            Ok(Some(_)) => return Ok("ja_legivel"),
+            Ok(None) => {}
+            Err(e) if e_xml_ilegivel(&e) => {}
+            Err(e) => return Err(e),
+        }
+        let c = compactar(&con, xml_bytes, "nfse", &dono, &papel)?;
+        con.execute("DELETE FROM nota_xml WHERE nota=?1", [nota_id])?;
+        con.execute(
+            "INSERT INTO nota_xml (nota, sha, tam, certs, molde, dados) VALUES (?1,?2,?3,?4,?5,?6)",
+            params![nota_id, c.sha, c.tam, c.certs, c.molde, c.dados],
+        )?;
+        limpar_caches();
+        if xml_disponivel_em(&con, nota_id)?.as_deref() != Some(xml_bytes) {
+            return Err(erro("O XML buscado não conferiu depois de gravado. Nada foi trocado."));
+        }
+        Ok("trocado")
+    });
+    if resultado.is_err() {
+        limpar_caches(); // o que entrou na memória durante a tentativa pode ter sido desfeito
+    }
+    resultado
 }
 
 /// Um evento guardado de uma nota.

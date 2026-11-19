@@ -1,5 +1,6 @@
 //! Transporte local entre a interface instalada e o serviço que possui os bancos.
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString, c_void};
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -53,7 +54,7 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::{banco, caminhos, despacho, permissoes, registro};
+use crate::{banco, caminhos, contexto_cliente, despacho, permissoes, registro};
 
 pub const SERVICO: &str = "BaiacuNFSeDados";
 const PIPE: &str = r"\\.\pipe\BaiacuNFSe.Dados.v1";
@@ -145,7 +146,6 @@ pub(crate) fn metodo_local(metodo: &str) -> bool {
                 | "cofre.limpar_temporarios"
                 | "ajuda.info"
                 | "registro.situacao"
-                | "registro.exportar_suporte"
                 | "emissao.aquecer"
                 | "usuarios.validar_senha"
                 | "usuarios.validar_credenciais_novas"
@@ -290,9 +290,9 @@ pub(crate) fn chamar(metodo: &str, args: &Value, avisar: despacho::Avisar) -> Va
 }
 
 struct Cliente {
-    pid: u32,
     processo: OwnedHandle,
     tarefas: AtomicUsize,
+    exclusivas: AtomicUsize,
 }
 impl Cliente {
     fn vivo(&self) -> bool {
@@ -300,10 +300,29 @@ impl Cliente {
     }
 }
 
-fn trancar() {
-    let _ = permissoes::definir_sessao(None);
-    banco::trancar();
-    registro::definir_usuario(None, None);
+type Clientes = BTreeMap<u32, Arc<Cliente>>;
+
+fn esquecer_cliente(pid: u32) {
+    permissoes::esquecer_cliente(pid);
+    banco::esquecer_cliente(pid);
+    despacho::esquecer_cliente(pid);
+}
+
+fn retirar_encerrados(clientes: &mut Clientes) {
+    clientes.retain(|&pid, cliente| {
+        if cliente.tarefas.load(Ordering::Acquire) > 0 || cliente.vivo() {
+            return true;
+        }
+        esquecer_cliente(pid);
+        false
+    });
+}
+
+fn requer_exclusividade(metodo: &str) -> bool {
+    matches!(metodo,
+        "backup.restaurar" | "banco.restaurar_de" | "chaves.criar_banco"
+        | "chaves.desfazer_criacao" | "chaves.trocar_senha_mestra"
+        | "usuarios.redefinir_senha_master")
 }
 
 fn abrir_processo(pid: u32, esperado: &Path) -> io::Result<OwnedHandle> {
@@ -397,7 +416,7 @@ fn resposta(pedido: Pedido, avisar: despacho::Avisar) -> Value {
     })
 }
 
-fn atender(mut canal: File, estado: &Mutex<Option<Arc<Cliente>>>) -> io::Result<()> {
+fn atender(mut canal: File, estado: &Mutex<Clientes>) -> io::Result<()> {
     let pipe = canal.as_raw_handle();
     let mut pid = 0;
     if unsafe { GetNamedPipeClientProcessId(pipe, &mut pid) } == 0 {
@@ -433,31 +452,36 @@ fn atender(mut canal: File, estado: &Mutex<Option<Arc<Cliente>>>) -> io::Result<
     let mut corpo = vec![0; tamanho];
     canal.read_exact(&mut corpo)?;
     let pedido: Pedido = serde_json::from_slice(&corpo)?;
+    let exclusiva = requer_exclusividade(&pedido.metodo);
+    let instalar = pedido.metodo == "dados.autorizar_atualizacao"
+        && pedido.args["metodo"] == "atualizacao.instalar";
     let cliente = {
-        let mut estado = estado
+        let mut clientes = estado
             .lock()
             .map_err(|_| invalido("Estado do serviço indisponível."))?;
-        match estado.as_ref() {
-            Some(c) if c.pid == pid && c.vivo() => Arc::clone(c),
-            Some(c) if c.vivo() || c.tarefas.load(Ordering::Acquire) > 0 => {
-                return enviar(
-                    &mut canal,
-                    &json!({"erro":{"tipo":"ServicoDadosOcupado",
-                    "msg":"Outro aplicativo Baiacu tem uma sessão ou uma tarefa em andamento."}}),
-                );
-            }
-            _ => {
-                trancar();
-                let cliente = Arc::new(Cliente {
-                    pid,
-                    processo,
-                    tarefas: AtomicUsize::new(0),
-                });
-                *estado = Some(Arc::clone(&cliente));
-                cliente
-            }
+        retirar_encerrados(&mut clientes);
+        if instalar && clientes.keys().any(|&outro| outro != pid) {
+            return enviar(&mut canal, &json!({"erro":{
+                "tipo":"ServicoDadosOcupado",
+                "msg":"Feche as outras janelas do Baiacu antes de instalar a atualização."
+            }}));
         }
-        .com_tarefa()
+        if clientes.iter().any(|(&outro, c)| {
+            outro != pid && (c.exclusivas.load(Ordering::Acquire) > 0
+                || exclusiva && (c.tarefas.load(Ordering::Acquire) > 0
+                    || contexto_cliente::com_cliente(outro, banco::destrancado)))
+        }) {
+            return enviar(&mut canal, &json!({"erro":{
+                "tipo":"ServicoDadosOcupado",
+                "msg":"Esta operação exige acesso exclusivo aos dados. Termine a operação em andamento ou saia da conta nas outras janelas do Baiacu e tente novamente."
+            }}));
+        }
+        let c = clientes.entry(pid).or_insert_with(|| Arc::new(Cliente {
+            processo,
+            tarefas: AtomicUsize::new(0),
+            exclusivas: AtomicUsize::new(0),
+        }));
+        Arc::clone(c).com_tarefa(exclusiva)
     };
     OPERADOR.with(|v| {
         *v.borrow_mut() = Some(Identidade {
@@ -470,7 +494,7 @@ fn atender(mut canal: File, estado: &Mutex<Option<Arc<Cliente>>>) -> io::Result<
         let _ = enviar(&mut canal.borrow_mut(), &json!({"aviso":v}));
     };
     let resultado = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        resposta(pedido, &avisar)
+        contexto_cliente::com_cliente(pid, || resposta(pedido, &avisar))
     }))
     .unwrap_or_else(
         |_| json!({"erro":{"tipo":"RuntimeError","msg":"Falha interna no serviço de dados."}}),
@@ -479,15 +503,21 @@ fn atender(mut canal: File, estado: &Mutex<Option<Arc<Cliente>>>) -> io::Result<
     enviar(&mut canal.borrow_mut(), &resultado)
 }
 
-struct Tarefa(Arc<Cliente>);
+struct Tarefa(Arc<Cliente>, bool);
 impl Cliente {
-    fn com_tarefa(self: Arc<Self>) -> Tarefa {
+    fn com_tarefa(self: Arc<Self>, exclusiva: bool) -> Tarefa {
         self.tarefas.fetch_add(1, Ordering::AcqRel);
-        Tarefa(self)
+        if exclusiva {
+            self.exclusivas.fetch_add(1, Ordering::AcqRel);
+        }
+        Tarefa(self, exclusiva)
     }
 }
 impl Drop for Tarefa {
     fn drop(&mut self) {
+        if self.1 {
+            self.0.exclusivas.fetch_sub(1, Ordering::AcqRel);
+        }
         self.0.tarefas.fetch_sub(1, Ordering::AcqRel);
     }
 }
@@ -542,7 +572,7 @@ fn atender_clientes(
     parar: &AtomicBool,
     pronto: impl FnOnce() -> windows_service::Result<()>,
 ) -> io::Result<()> {
-    let estado = Arc::new(Mutex::new(None::<Arc<Cliente>>));
+    let estado = Arc::new(Mutex::new(Clientes::new()));
     let ativas = Arc::new(AtomicUsize::new(0));
     let mut pipe = criar_pipe(PIPE, true)?;
     pronto().map_err(io::Error::other)?;
@@ -559,13 +589,8 @@ fn atender_clientes(
                 continue;
             }
             Some(ERROR_PIPE_LISTENING) => {
-                if let Ok(mut dono) = estado.lock()
-                    && dono
-                        .as_ref()
-                        .is_some_and(|c| !c.vivo() && c.tarefas.load(Ordering::Acquire) == 0)
-                {
-                    trancar();
-                    *dono = None;
+                if let Ok(mut clientes) = estado.lock() {
+                    retirar_encerrados(&mut clientes);
                 }
                 std::thread::sleep(Duration::from_millis(8));
                 continue;
@@ -596,7 +621,11 @@ fn atender_clientes(
     while ativas.load(Ordering::Acquire) > 0 {
         std::thread::sleep(Duration::from_millis(100));
     }
-    trancar();
+    if let Ok(clientes) = estado.lock() {
+        for &pid in clientes.keys() {
+            esquecer_cliente(pid);
+        }
+    }
     Ok(())
 }
 

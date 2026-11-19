@@ -1,6 +1,7 @@
 //! Permissões por nível: catálogo fechado, herança por máximo e sessão autenticada.
 use crate::{
     banco,
+    contexto_cliente::{Guarda, PorCliente},
     erro::{Erro, Res},
     usuarios,
 };
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
-    sync::{Mutex, MutexGuard, OnceLock},
+    sync::OnceLock,
     time::{Duration, Instant},
 };
 
@@ -16,11 +17,18 @@ pub const META: &str = "seguranca.permissoes_nivel.v1";
 const EDITAR_PERFIL: &str = "usuarios.permissoes";
 const TROCAR_MESTRA: &str = "config.senha_mestra";
 const DURACAO: Duration = Duration::from_secs(300);
-static SESSAO: Mutex<Option<Sessao>> = Mutex::new(None);
+static SESSAO: PorCliente<Option<Sessao>> = PorCliente::novo();
+
+#[cfg(windows)]
+pub(crate) fn esquecer_cliente(pid: u32) {
+    SESSAO.esquecer(pid);
+}
 
 struct Sessao {
     operador: usuarios::Usuario,
     autorizacoes: Vec<Autorizacao>,
+    pendentes: BTreeMap<String, Autorizacao>,
+    inicio: Instant,
 }
 
 struct Autorizacao {
@@ -28,6 +36,7 @@ struct Autorizacao {
     usuario: usuarios::Usuario,
     nivel_autorizado: i64,
     inicio: Instant,
+    token: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -47,7 +56,7 @@ pub fn catalogo() -> &'static [Regra] {
     })
 }
 
-fn sessao() -> Res<MutexGuard<'static, Option<Sessao>>> {
+fn sessao() -> Res<Guarda<'static, Option<Sessao>>> {
     SESSAO
         .lock()
         .map_err(|_| Erro::runtime("Sessão indisponível"))
@@ -57,6 +66,8 @@ pub(crate) fn definir_sessao(operador: Option<&usuarios::Usuario>) -> Res<()> {
     *sessao()? = operador.cloned().map(|operador| Sessao {
         operador,
         autorizacoes: Vec::new(),
+        pendentes: BTreeMap::new(),
+        inicio: Instant::now(),
     });
     Ok(())
 }
@@ -70,6 +81,7 @@ pub fn limpar_autorizacoes() {
     if let Ok(mut sessao) = sessao() {
         if let Some(sessao) = sessao.as_mut() {
             sessao.autorizacoes.clear();
+            sessao.pendentes.clear();
         }
     }
 }
@@ -90,12 +102,86 @@ fn sessao_ativa(sessao: &Option<Sessao>) -> Res<&Sessao> {
 }
 
 pub(crate) fn exigir_prestador_da_sessao(prestador: &str) -> Res<()> {
-    let s = sessao()?;
-    let operador = usuario_atual(&sessao_ativa(&s)?.operador)?;
+    let operador = operador_atual()?;
+    let documento = crate::cofre::so_doc(prestador);
+    if documento.is_empty() {
+        return Err(Erro::valor("Selecione um prestador."));
+    }
     if !operador.is_master()
-        && !usuarios::prestadores_permitidos(&operador)?.iter().any(|p| p == prestador)
+        && !usuarios::prestadores_permitidos(&operador)?.iter().any(|p| p == &documento)
     {
         return Err(Erro::valor("Este prestador não está liberado para o seu usuário."));
+    }
+    Ok(())
+}
+
+pub(crate) fn operador_id() -> Option<i64> {
+    sessao().ok()?.as_ref().map(|s| s.operador.id)
+}
+
+pub(crate) fn operador_atual() -> Res<usuarios::Usuario> {
+    let operador = {
+        let s = sessao()?;
+        sessao_ativa(&s)?.operador.clone()
+    };
+    usuario_atual(&operador)
+}
+
+pub(crate) fn exigir_conta_propria(id: i64) -> Res<()> {
+    if operador_atual()?.id != id {
+        return Err(Erro::valor("Esta opção pertence à conta em uso."));
+    }
+    Ok(())
+}
+
+pub(crate) fn checar_escopo(metodo: &str, args: &Value) -> Res<()> {
+    use crate::despacho::{inteiro, texto};
+
+    match metodo {
+        "cofre.nota_por_id" | "cofre.xml_da_nota" => {
+            operador_atual()?;
+        }
+        "cadastro.delete_prestador" => {
+            exigir_prestador_da_sessao(texto(args, "documento")?)?;
+        }
+        "cadastro.ultimo_prestador" | "cadastro.guardar_ultimo_prestador" => {
+            exigir_conta_propria(inteiro(args, "usuario_id")?)?;
+            if metodo == "cadastro.guardar_ultimo_prestador" {
+                exigir_prestador_da_sessao(texto(args, "documento")?)?;
+            }
+        }
+        "usuarios.set_foto" | "usuarios.set_foto_rgba" | "usuarios.get_foto" => {
+            exigir_conta_propria(inteiro(args, "usuario_id")?)?;
+        }
+        "usuarios.prestadores_vinculados" => {
+            let id = inteiro(args, "usuario_id")?;
+            if operador_atual()?.id != id {
+                exigir("usuarios.prestadores")?;
+            }
+        }
+        "usuarios.esquecer_prestador" => exigir_prestador_da_sessao(texto(args, "prestador")?)?,
+        "segredos.tem_cert_pfx" => {
+            let cert = texto(args, "cert")?;
+            let dono = cert.split_once('@').map_or(cert, |(dono, _)| dono);
+            exigir_prestador_da_sessao(dono)?;
+        }
+        // Gerir vínculos é uma operação administrativa global.
+        "usuarios.vincular_prestador" | "usuarios.desvincular_prestador" => {}
+        _ => {
+            for campo in ["prestador", "dono"] {
+                if let Some(doc) = args[campo].as_str() {
+                    if doc.is_empty() && matches!(metodo,
+                        "cadastro.servico_validate" | "emissao.list_pendentes"
+                        | "emissao.count_pendentes" | "emissao.ambiente_from_xml"
+                        | "consulta.page_nfse_index" | "consulta.count_nfse_index"
+                        | "banco.get_meta")
+                    {
+                        continue;
+                    }
+                    exigir_prestador_da_sessao(doc)?;
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -192,7 +278,7 @@ pub fn minimo(key: &str) -> Res<i64> {
     efetivo(key, &niveis()?)
 }
 
-fn autorizador(key: &str, informado: Option<i64>) -> Res<Option<usuarios::Usuario>> {
+pub(crate) fn autorizador(key: &str, informado: Option<i64>) -> Res<Option<usuarios::Usuario>> {
     let sessao = sessao()?;
     let sessao = sessao_ativa(&sessao)?;
     let operador = usuario_atual(&sessao.operador)?;
@@ -247,14 +333,18 @@ pub(crate) fn autenticar_autorizacao(
     if key == EDITAR_PERFIL {
         exigir(key)?;
     }
-    let mut sessao = sessao()?;
-    let sessao = sessao
-        .as_mut()
-        .ok_or_else(|| Erro::valor("Entre no programa para continuar."))?;
-    usuario_atual(&sessao.operador)?;
+    let (operador, inicio) = {
+        let s = sessao()?;
+        let s = sessao_ativa(&s)?;
+        (s.operador.clone(), s.inicio)
+    };
+    usuario_atual(&operador)?;
     let nivel_autorizado = minimo(key)?;
     let (usuario, ambiguo) = usuarios::autenticar_por_senha(senha, nivel_autorizado)?;
     if let Some(usuario) = &usuario {
+        let mut s = sessao()?;
+        let sessao = s.as_mut().filter(|s| s.inicio == inicio)
+            .ok_or_else(|| Erro::trancado("Entre no Baiacu para continuar."))?;
         sessao
             .autorizacoes
             .retain(|a| a.chave != key && a.inicio.elapsed() < DURACAO);
@@ -263,15 +353,96 @@ pub(crate) fn autenticar_autorizacao(
             usuario: usuario.clone(),
             nivel_autorizado,
             inicio: Instant::now(),
+            token: None,
         });
+        crate::registro::info("autorizacao", &format!(
+            "Ação {key} autorizada para o operador #{}. Identidade de quem autorizou: {}.",
+            operador.id,
+            if ambiguo { "não determinada".into() } else { format!("#{}", usuario.id) },
+        ));
     }
     Ok((usuario, ambiguo))
+}
+
+const PRAZO_PROPOSTA: Duration = Duration::from_secs(15);
+
+fn preparar_autorizacao(args: &Value) -> Res<Value> {
+    use crate::despacho::texto;
+    let chave = texto(args, "chave")?;
+    // Código de autorização (2 caracteres) seguido da senha, num campo só.
+    let credencial = texto(args, "credencial")?;
+    let (operador, inicio) = {
+        let s = sessao()?;
+        let s = sessao_ativa(&s)?;
+        (s.operador.clone(), s.inicio)
+    };
+    let operador = usuario_atual(&operador)?;
+    if chave == EDITAR_PERFIL && !operador.is_master() {
+        return Err(Erro::valor("Somente o usuário nível 4 logado pode gerir permissões."));
+    }
+    let iniciado = Instant::now();
+    let nivel = minimo(chave)?;
+    // O código aponta uma única conta: só a senha dela é calculada, fora da trava da sessão.
+    let Some(usuario) = usuarios::autenticar_por_codigo(credencial)?.filter(|u| u.nivel >= nivel)
+    else {
+        return Ok(Value::Null);
+    };
+    let token = hex::encode(crate::chaves::aleatorio(24));
+    let mut s = sessao()?;
+    let s = s.as_mut().filter(|s| s.inicio == inicio)
+        .ok_or_else(|| Erro::trancado("Entre no Baiacu para continuar."))?;
+    s.pendentes.retain(|_, a| a.inicio.elapsed() < PRAZO_PROPOSTA);
+    s.pendentes.insert(token.clone(), Autorizacao {
+        chave: chave.into(),
+        usuario,
+        nivel_autorizado: nivel,
+        inicio: iniciado,
+        token: Some(token.clone()),
+    });
+    Ok(json!(token))
+}
+
+fn confirmar_autorizacao(args: &Value) -> Res<Value> {
+    let token = crate::despacho::texto(args, "token")?;
+    let mut s = sessao()?;
+    let s = s.as_mut().ok_or_else(|| Erro::trancado("Entre no Baiacu para continuar."))?;
+    let mut a = s.pendentes.remove(token)
+        .filter(|a| a.inicio.elapsed() < PRAZO_PROPOSTA)
+        .ok_or_else(|| Erro::valor("A confirmação expirou. Tente autorizar de novo."))?;
+    let operador = usuario_atual(&s.operador)?;
+    let usuario = usuario_atual(&a.usuario)?;
+    let nivel = minimo(&a.chave)?;
+    if nivel > a.nivel_autorizado || usuario.nivel < nivel
+        || (a.chave == EDITAR_PERFIL && !operador.is_master())
+    {
+        return Err(Erro::valor("As permissões mudaram. Tente autorizar de novo."));
+    }
+    let resultado = json!({"usuario": usuario, "nivel": nivel, "duracao": DURACAO.as_secs()});
+    crate::registro::info("autorizacao", &format!(
+        "Ação {} autorizada para o operador #{} pelo usuário #{} (nível {}).",
+        a.chave, operador.id, usuario.id, usuario.nivel,
+    ));
+    a.usuario = usuario;
+    a.inicio = Instant::now();
+    s.autorizacoes.retain(|b| b.chave != a.chave && b.inicio.elapsed() < DURACAO);
+    s.autorizacoes.push(a);
+    Ok(resultado)
 }
 pub fn documento(levels: BTreeMap<String, i64>) -> Value {
     json!({"formato":"baiacu-permissoes","versao":1,"niveis":levels})
 }
 pub fn executar(method: &str, args: &Value) -> Res<Value> {
     match method {
+        "permissoes.preparar_autorizacao" => preparar_autorizacao(args),
+        "permissoes.confirmar_autorizacao" => confirmar_autorizacao(args),
+        "permissoes.cancelar_autorizacao" => {
+            let token = crate::despacho::texto(args, "token")?;
+            if let Some(s) = sessao()?.as_mut() {
+                s.pendentes.remove(token);
+                s.autorizacoes.retain(|a| a.token.as_deref() != Some(token));
+            }
+            Ok(Value::Null)
+        }
         "permissoes.carregar" => {
             let sessao = sessao()?;
             usuario_atual(&sessao_ativa(&sessao)?.operador)?;
@@ -301,6 +472,7 @@ pub fn executar(method: &str, args: &Value) -> Res<Value> {
             if method == "permissoes.salvar" {
                 banco::set_meta(META, &serde_json::to_string(&doc)?)?;
                 sessao.autorizacoes.clear();
+                sessao.pendentes.clear();
                 crate::registro::info(
                     "permissoes",
                     "Perfil de permissões por nível alterado pelo master.",

@@ -16,6 +16,7 @@ import '../kit/flet.dart';
 import '../nucleo.dart';
 import '../tema.dart';
 import '../permissoes.dart';
+import 'codigo_autorizacao.dart' show tamanhoCodigo;
 import 'dialogo.dart';
 
 export '../acesso/acesso.dart' show Usuario;
@@ -243,29 +244,7 @@ class App {
   /// Para a sincronização em curso do Cofre.
   VoidCallback? cofreCancelarSinc;
 
-  /// Documentos dos prestadores que o usuário logado enxerga (o master, todos).
-  List<String> prestadoresVisiveis() {
-    var docs = [
-      for (final p in jaLista('cadastro.list_prestadores'))
-        p['documento'] as String,
-    ];
-    if (!usuario.master) {
-      final permitidos = ja<List>('usuarios.prestadores_permitidos', {
-        'usuario': usuario.paraJson(),
-      }).cast<String>().toSet();
-      docs = [
-        for (final d in docs)
-          if (permitidos.contains(d)) d,
-      ];
-    }
-    return docs;
-  }
-
-  List paresCofre() => ja<List>('cofre.alvos', {
-    'prestador_em_uso': prestador,
-    'prestadores': prestadoresVisiveis(),
-    'usuario': usuario.paraJson(),
-  });
+  List paresCofre() => ja<List>('cofre.alvos', {'prestador_em_uso': prestador});
 
   /// O cadastro de clientes mudou: caches caem e as listas das telas são refeitas.
   final List<VoidCallback> aoInvalidarClientes = [];
@@ -367,20 +346,6 @@ class App {
       cores['fundo'] as String,
       cores['cartoes'] as String,
     );
-    try {
-      pdfNativo =
-          ja<String>('banco.get_meta', {'chave': 'ui.pdf_nativo'}) != '0';
-    } catch (_) {
-      pdfNativo = true;
-    }
-    try {
-      minimizarAoFechar =
-          ja<String>('banco.get_meta', {'chave': metaMinimizarAoFechar}) == '1';
-    } catch (_) {
-      minimizarAoFechar = false;
-    }
-    ja<Object?>('registro.definir_usuario', {'operador_id': usuario.id});
-
     var lista = jaLista('cadastro.list_prestadores');
     final preferido = ja<String>('cadastro.ultimo_prestador', {
       'usuario_id': usuario.id,
@@ -414,8 +379,9 @@ class App {
     ambiente = prestador.isEmpty
         ? ambProducao
         : ja<String>('cadastro.get_ambiente', {'prestador': prestador});
+    _carregarPreferenciasDoPrestador();
     // Não-master pode alternar entre os prestadores liberados; trava só se tiver 1.
-    ddPrestadorTravado = !usuario.master && lista.length <= 1;
+    ddPrestadorTravado = lista.isEmpty || (!usuario.master && lista.length == 1);
     ddPrestador.opcoes = [
       for (final p in lista)
         Opcao(p['documento'] as String, p['display'] as String),
@@ -425,6 +391,26 @@ class App {
     // não têm o que mostrar: o programa abre nas Configurações.
     if (prestador.isEmpty) navAtual = 3;
     carregarFoto();
+  }
+
+  void _carregarPreferenciasDoPrestador() {
+    final escopo = {if (prestador.isNotEmpty) 'prestador': prestador};
+    try {
+      pdfNativo = ja<String>('banco.get_meta', {
+        'chave': 'ui.pdf_nativo',
+        ...escopo,
+      }) != '0';
+    } catch (_) {
+      pdfNativo = true;
+    }
+    try {
+      minimizarAoFechar = ja<String>('banco.get_meta', {
+        'chave': metaMinimizarAoFechar,
+        ...escopo,
+      }) == '1';
+    } catch (_) {
+      minimizarAoFechar = false;
+    }
   }
 
   void recarregarPrestadores() {
@@ -438,10 +424,13 @@ class App {
           if (permitidos.contains(p['documento'])) p,
       ];
     }
+    ddPrestadorTravado = lista.isEmpty || (!usuario.master && lista.length == 1);
     ddPrestador.opcoes = [
       for (final p in lista)
         Opcao(p['documento'] as String, p['display'] as String),
     ];
+    ddPrestador.avisar();
+    tiqueCasca.value++;
   }
 
   void carregarFoto() {
@@ -457,16 +446,25 @@ class App {
   int get nivel => usuario.nivel;
   bool get master => usuario.master;
   bool pode(int n) => nivel >= n;
-  bool temPermissao(String chave, {bool somenteLogado = false}) {
-    if (pode(Permissoes.efetivo(chave))) return true;
-    return !somenteLogado && ja<bool>('permissoes.pode', {'chave': chave});
-  }
+  final _autorizacoes = <String, (Usuario, int, DateTime)>{};
+
+  void limparAutorizacoes() => _autorizacoes.clear();
+
+  bool temPermissao(String chave, {bool somenteLogado = false}) =>
+      somenteLogado ? pode(Permissoes.efetivo(chave)) : autorizadorDaAcao(chave) != null;
 
   Usuario? autorizadorDaAcao(String chave) {
-    final dados = ja<Map?>('permissoes.autorizador', {'chave': chave});
-    return dados == null
-        ? null
-        : Usuario.deJson(Map<String, dynamic>.from(dados));
+    final n = Permissoes.efetivo(chave);
+    if (chave != 'config.senha_mestra' && pode(n)) return usuario;
+    if (chave == 'usuarios.permissoes') return null;
+    final agora = DateTime.now();
+    for (final entrada in _autorizacoes.entries.toList().reversed) {
+      final (autorizador, nivel, ate) = entrada.value;
+      final cobre = entrada.key == chave ||
+          (chave != 'config.senha_mestra' && chave.startsWith('${entrada.key}.'));
+      if (cobre && nivel >= n && agora.isBefore(ate)) return autorizador;
+    }
+    return null;
   }
 
   Future<bool> autorizarAcao(String chave) {
@@ -498,55 +496,73 @@ class App {
     var erro = '';
     var processando = false;
     var concedida = false;
-    late final TextEditingController senha;
-    late final FocusNode focoSenha;
+    // Código de autorização (2 caracteres) seguido da senha, num campo só.
+    late final TextEditingController credencial;
+    late final FocusNode focoCredencial;
+    const prazo = Duration(seconds: 8);
+    String? proposta;
 
-    void ok() {
+    void descartarProposta() {
+      final token = proposta;
+      proposta = null;
+      if (token != null) {
+        unawaited(chamar<Object?>(
+          'permissoes.cancelar_autorizacao',
+          {'token': token},
+        ).catchError((Object _) => null));
+      }
+    }
+
+    Future<void> ok() async {
       if (processando) return;
-      processando = true;
-      Map<String, dynamic> r;
-      try {
-        r = jaMapa('usuarios.autenticar_por_senha', {
-          'senha': senha.text,
-          'permissao': chave,
-        });
-      } catch (e) {
-        processando = false;
-        erro = '$e';
+      if (credencial.text.length <= tamanhoCodigo) {
+        erro = 'Digite o código de autorização seguido da senha.';
         d.atualizar();
         return;
       }
-      final dado = r['usuario'];
-      if (dado != null) {
-        final u = Usuario.deJson(Map<String, dynamic>.from(dado as Map));
-        if (r['ambiguo'] == true) {
-          ja<Object?>('registro.definir_usuario', {'operador_id': usuario.id});
-          registrar(
-            'Autorizado por senha de nível ${u.nivel} (exigido $n) — usuário '
-            'INDETERMINADO: há mais de uma senha igual',
-            nivel: 'warning',
-          );
-        } else {
-          ja<Object?>('registro.definir_usuario', {
-            'operador_id': usuario.id,
-            'autorizador_id': u.id,
-          });
-          registrar(
-            'Autorizado por senha de nível ${u.nivel} do usuário #${u.id} ${u.login} '
-            '(exigido $n) — $titulo',
-          );
+      processando = true;
+      erro = '';
+      d.atualizar();
+      final tempo = Stopwatch()..start();
+      try {
+        final token = await chamar<String?>('permissoes.preparar_autorizacao', {
+          'chave': chave,
+          'credencial': credencial.text,
+        }).timeout(prazo);
+        proposta = token;
+        if (!viva || !d.aberto) return;
+        if (token == null) {
+          erro = 'Confira o código, a senha e o nível de quem vai autorizar.';
+          credencial.clear();
+          focar(focoCredencial);
+          return;
         }
+        final restante = prazo - tempo.elapsed;
+        if (restante <= Duration.zero) throw TimeoutException('Autorização');
+        final r = await chamar<Map>('permissoes.confirmar_autorizacao', {
+          'token': token,
+        }).timeout(restante);
+        if (!viva || !d.aberto) return;
+        final u = Usuario.deJson(Map<String, dynamic>.from(r['usuario'] as Map));
+        final duracao = Duration(seconds: r['duracao'] as int);
+        _autorizacoes.remove(chave);
+        _autorizacoes[chave] = (u, r['nivel'] as int, DateTime.now().add(duracao));
+        proposta = null;
         concedida = true;
         fecharEsta(d);
-        agendar(const Duration(minutes: 5), atualizar);
-        aoOk();
-      } else {
-        processando = false;
-        erro = 'Senha não confere com nenhum usuário de nível $n ou superior.';
-        senha.clear();
-        d.atualizar();
-        focar(focoSenha);
+        agendar(duracao, atualizar);
+      } on TimeoutException {
+        erro = 'O serviço demorou para responder. Tente autorizar de novo.';
+      } catch (e) {
+        erro = '$e';
+      } finally {
+        descartarProposta();
+        if (viva && d.aberto) {
+          processando = false;
+          d.atualizar();
+        }
       }
+      if (concedida && viva) aoOk();
     }
 
     void cancelar() {
@@ -573,20 +589,28 @@ class App {
             idLayout: 'TamanhosDialogos.rotuloSenhaDeNivelN',
           ),
           CampoTexto(
-            controle: senha,
-            rotulo: 'Senha',
+            controle: credencial,
             largura: TamanhosDialogos.campoSenha.largura,
             senha: true,
             revelarSenha: true,
             focoInicial: true,
-            foco: focoSenha,
+            desabilitado: processando,
+            foco: focoCredencial,
             aoEnviar: (_) => ok(),
             altura: TamanhosDialogos.campoSenha.altura,
             idLayout: 'TamanhosDialogos.campoSenha',
           ),
           Tx(
-            erro,
-            cor: Colors.red.shade600,
+            'Digite o código de autorização seguido da senha',
+            cor: Colors.grey.shade700,
+            tam: Letra.apoio,
+            largura: TamanhosDialogos.rotuloDicaCodigo.largura,
+            altura: TamanhosDialogos.rotuloDicaCodigo.altura,
+            idLayout: 'TamanhosDialogos.rotuloDicaCodigo',
+          ),
+          Tx(
+            processando ? 'Conferindo autorização…' : erro,
+            cor: processando ? null : Colors.red.shade600,
             tam: Letra.apoio,
             largura: TamanhosDialogos.rotuloErro.largura,
             altura: TamanhosDialogos.rotuloErro.altura,
@@ -607,7 +631,7 @@ class App {
         ),
         Botao(
           'OK',
-          aoClicar: ok,
+          aoClicar: processando ? null : ok,
           largura: TamanhosDialogos.botaoOK.largura,
           altura: TamanhosDialogos.botaoOK.altura,
           idLayout: 'TamanhosDialogos.botaoOK',
@@ -616,12 +640,15 @@ class App {
       // Esc/"X" fecham sem passar por `cancelar`: quem depende do aoCancelar para
       // destravar estado (a trava do botão Emitir) não pode ficar preso.
       aoFechar: () {
-        if (!concedida) aoCancelar?.call();
+        if (!concedida) {
+          descartarProposta();
+          aoCancelar?.call();
+        }
       },
       idLayout: 'Janela.app.Dialogo.1',
     );
-    senha = d.texto();
-    focoSenha = d.foco();
+    credencial = d.texto();
+    focoCredencial = d.foco();
     mostrarDialogo(d);
   }
 
@@ -955,10 +982,6 @@ class App {
           'nivel': 'info',
           'msg': 'Logout do usuário ${usuario.login}',
         }).timeout(const Duration(seconds: 1));
-        await chamar<Object?>(
-          'registro.definir_usuario',
-          {},
-        ).timeout(const Duration(seconds: 1));
         await chamar<Object?>('correio.encerrar_smtp', {
           'aguardar': false,
         }).timeout(const Duration(seconds: 1));
@@ -1067,6 +1090,7 @@ class App {
   void encerrar() {
     if (encerrada) return;
     encerrada = true;
+    limparAutorizacoes();
     HardwareKeyboard.instance.removeHandler(_tecla);
     for (final t in List.of(_timers)) {
       t.cancel();
@@ -1190,6 +1214,7 @@ class App {
       registrar('Prestador selecionado: ${formatarDocumento(novo)}');
     }
     prestador = novo;
+    _carregarPreferenciasDoPrestador();
     semPrestador = novo.isEmpty && !usuario.master;
     if (novo.isNotEmpty) {
       try {

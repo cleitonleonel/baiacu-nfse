@@ -8,6 +8,7 @@ import '../acesso/acesso.dart' show loginMax, mascaraLogin, nomeMax;
 import '../kit/campo.dart';
 import '../kit/flet.dart';
 import 'app.dart';
+import 'codigo_autorizacao.dart';
 import 'menu_usuario.dart';
 import 'permissoes_nivel.dart';
 
@@ -138,6 +139,18 @@ void abrirUsuarios(App app) {
                           idLayout: 'TamanhosUsuarios.botaoRedefinirSenha',
                         ),
                         BotaoIcone(
+                          Icons.pin,
+                          dica: 'Redefinir código de autorização',
+                          tamanho: 18,
+                          aoClicar: () => app.exigirPermissao(
+                            'usuarios.senha',
+                            () => abrirDefinirCodigo(app, alvo: u),
+                          ),
+                          largura: TamanhosUsuarios.botaoRedefinirCodigo.largura,
+                          altura: TamanhosUsuarios.botaoRedefinirCodigo.altura,
+                          idLayout: TamanhosUsuarios.botaoRedefinirCodigo.id,
+                        ),
+                        BotaoIcone(
                           Icons.storefront,
                           dica: 'Prestadores que pode operar',
                           tamanho: 18,
@@ -205,7 +218,7 @@ void abrirUsuarios(App app) {
 
   d = Dialogo(
     titulo: (_) => app.tituloComX('Usuários'),
-    largura: 710,
+    largura: 742,
     alinhamentoAcoes: MainAxisAlignment.start,
     conteudo: (_) {
       final total = lista.length;
@@ -352,8 +365,12 @@ void _novoUsuario(App app, VoidCallback recarregar) {
   late final Dialogo d;
   late final TextEditingController login, nome, senha, conf;
   late final Suspensa nivel;
+  late final ConferenciaCodigo codigo;
   // Multi-seleção dos prestadores que o novo usuário poderá operar.
-  final prestadores = jaLista('cadastro.list_prestadores');
+  final podeVincular = app.temPermissao('usuarios.prestadores');
+  final prestadores = podeVincular
+      ? jaLista('cadastro.list_prestadores_para_vincular')
+      : <Map<String, dynamic>>[];
   final escolhidos = <String>{};
 
   Future<void> criar() async {
@@ -365,6 +382,15 @@ void _novoUsuario(App app, VoidCallback recarregar) {
     });
     if (msg != null && msg.isNotEmpty) {
       app.toast(msg, erro: true);
+      return;
+    }
+    if (!codigo.pronto) {
+      app.toast(
+        codigo.completo
+            ? 'Escolha um código de autorização disponível.'
+            : 'Informe o código de autorização: 2 letras ou números.',
+        erro: true,
+      );
       return;
     }
     final docs = escolhidos.toList()..sort();
@@ -382,10 +408,13 @@ void _novoUsuario(App app, VoidCallback recarregar) {
             'senha': senha.text,
             'prestadores': docs,
             'criado_por': por.paraJson(),
+            'codigo': codigo.codigo,
           }),
         ),
       );
     } catch (e) {
+      // Outra conta pode ter ficado com o código depois da conferência: confere de novo.
+      if ('$e'.contains('código')) codigo.recusado();
       app.toast('$e', erro: true);
       return;
     }
@@ -462,6 +491,24 @@ void _novoUsuario(App app, VoidCallback recarregar) {
           cruzado: CrossAxisAlignment.start,
           idLayout: 'Grupo.usuarios.lin.6',
         ),
+        col(
+          [
+            codigo.campo(
+              idLayout: 'TamanhosUsuarios.campoCodigo',
+              largura: TamanhosUsuarios.campoCodigo.largura,
+            ),
+            codigo.situacao(idLayout: 'Usuarios.novo.situacaoCodigo'),
+            Tx(
+              explicacaoCodigo,
+              tam: Letra.apoio,
+              cor: Colors.grey.shade700,
+              idLayout: 'Usuarios.novo.rotuloExplicacaoCodigo',
+            ),
+          ],
+          espaco: 4,
+          justa: true,
+          idLayout: 'Grupo.usuarios.col.codigo',
+        ),
         Ct(
           borda: Border.all(color: Colors.grey.shade400, width: 1),
           raio: BorderRadius.circular(8),
@@ -482,7 +529,9 @@ void _novoUsuario(App app, VoidCallback recarregar) {
               ),
               if (prestadores.isEmpty)
                 Tx(
-                  'Nenhum prestador cadastrado. O usuário poderá entrar sem operar.',
+                  podeVincular
+                      ? 'Nenhum prestador cadastrado.'
+                      : 'Um usuário autorizado poderá vincular prestadores depois.',
                   italico: true,
                   cor: Colors.orange.shade800,
                   largura: TamanhosUsuarios
@@ -546,6 +595,7 @@ void _novoUsuario(App app, VoidCallback recarregar) {
   nome = d.texto();
   senha = d.texto();
   conf = d.texto();
+  codigo = ConferenciaCodigo(controle: d.texto(), aoMudar: d.atualizar);
   nivel = d.suspensa(
     valor: '${niveis.last}',
     opcoes: [for (final n in niveis) Opcao('$n', _nomesNivel[n]!)],
@@ -568,7 +618,7 @@ void gerirPrestadores(App app, Usuario alvo) {
     return;
   }
   late final Dialogo d;
-  final todos = jaLista('cadastro.list_prestadores');
+  final todos = jaLista('cadastro.list_prestadores_para_vincular');
   final nomes = {
     for (final p in todos) p['documento'] as String: p['display'] as String,
   };

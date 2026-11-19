@@ -85,6 +85,9 @@ class _Resumo {
           .toList(),
       retencoes = _numero(m, 'retencoes'),
       xmlIndisponiveis = _numero(m, 'xml_indisponiveis'),
+      xmlIlegiveis = [
+        for (final v in (m['xml_ilegiveis'] as List? ?? const [])) v as int,
+      ],
       clientes = _numero(m, 'clientes');
 
   final _Valores total, anterior;
@@ -92,6 +95,9 @@ class _Resumo {
   final _DadosGrafico grafico;
   final List<_Cliente> rankingBruto, rankingLiquido;
   final int retencoes, xmlIndisponiveis, clientes;
+
+  /// Notas do recorte cujo XML guardado não abre: dá para buscar de novo na SEFIN.
+  final List<int> xmlIlegiveis;
 }
 
 class TelaDashboard extends StatefulWidget {
@@ -127,11 +133,19 @@ class _TelaDashboardState extends State<TelaDashboard> {
   bool _comparativo = false;
   bool _mostrar = false;
   DateTime? _de, _ate;
-  bool _competencia = false;
+  String _base = 'emissao';
   int _pedido = 0;
   _Resumo? _resumo;
   bool _carregando = false;
   String? _falha;
+
+  /// Substituições autorizadas na SEFIN que o Cofre ainda não refletiu: a nota antiga pode
+  /// continuar somando até a atualização.
+  int _substPendentes = 0;
+  bool _substEmConferencia = false;
+
+  /// Busca na SEFIN dos XMLs que não abrem, em andamento.
+  bool _rebuscando = false;
   Timer? _atualizacaoDeNotas, _viradaDoDia;
 
   @override
@@ -215,6 +229,8 @@ class _TelaDashboardState extends State<TelaDashboard> {
       _mostrar = false;
       _falha = null;
       _carregando = false;
+      _substPendentes = 0;
+      _substEmConferencia = false;
     });
   }
 
@@ -276,12 +292,35 @@ class _TelaDashboardState extends State<TelaDashboard> {
         mounted && app.viva && pedido == _pedido && dono == app.prestador;
     unawaited(
       app.emSegundoPlano(() async {
+        // Antes do resumo: o núcleo tenta de novo as marcas pendentes e diz quantas restam.
+        try {
+          final pendentes = await chamar<List>(
+            'cofre.substituicoes_pendentes',
+            {'dono': dono},
+          );
+          final emConferencia = pendentes.any(
+            (p) => p is Map && p['aguarda_conferencia'] == true,
+          );
+          if (atual() && (pendentes.length != _substPendentes || emConferencia != _substEmConferencia)) {
+            setState(() {
+              _substPendentes = pendentes.length;
+              _substEmConferencia = emConferencia;
+            });
+          }
+        } catch (e) {
+          registrar(
+            'Dashboard: substituições pendentes não puderam ser conferidas: $e',
+            nivel: 'warning',
+          );
+        }
+        if (!atual()) return;
         try {
           final mapa = await chamar<Map>('dashboard.resumo', {
             'dono': dono,
             'ini': dataIso(de),
             'fim': dataIso(ate),
-            'competencia': _competencia,
+            'competencia': _base == 'competencia',
+            if (_base == 'movimento') 'movimento': true,
             if (periodos.length > 1)
               'anteriores': [for (final p in periodos.skip(1)) p.limites],
           });
@@ -297,6 +336,52 @@ class _TelaDashboardState extends State<TelaDashboard> {
         }
       }),
     );
+  }
+
+  /// Busca os XMLs um por vez. Uma falha da nota não impede a busca das demais.
+  Future<void> _rebuscarIlegiveis(List<int> ids) async {
+    if (_rebuscando || ids.isEmpty) return;
+    final dono = app.prestador;
+    if (!await app.autorizarAcao('cofre.rebuscar') ||
+        !mounted || _rebuscando || dono != app.prestador) return;
+    setState(() => _rebuscando = true);
+    final h = app.toastProgresso(
+      'Buscando na SEFIN ${ids.length == 1 ? 'o XML de 1 nota' : 'os XMLs de ${ids.length} notas'}…',
+    );
+    var certos = 0;
+    var indisponiveis = 0;
+    String? detalhe;
+    String? pausa;
+    await app.emSegundoPlano(() async {
+      for (final id in ids) {
+        if (!mounted || !app.viva || dono != app.prestador) break;
+        try {
+          await chamar<Map>('cofre.rebuscar_xml', {'dono': dono, 'nota_id': id});
+          certos++;
+        } catch (e) {
+          registrar('Dashboard: busca do XML da nota $id falhou: $e', nivel: 'warning');
+          final dados = e is ErroNucleo ? e.dados : null;
+          if (dados is Map && dados['falha_da_nota'] == true) {
+            indisponiveis++;
+            detalhe ??= '$e';
+            continue;
+          }
+          pausa = '$e';
+          break;
+        }
+      }
+    });
+    final falhou = indisponiveis > 0 || pausa != null;
+    final texto = !falhou
+        ? '$certos XML(s) buscados na SEFIN e guardados de novo no Cofre.'
+        : '$certos de ${ids.length} XML(s) recuperados.'
+          '${indisponiveis > 0 ? ' $indisponiveis XML(s) indisponíveis.' : ''}'
+          '${pausa != null ? ' A busca foi pausada. $pausa' : ' $detalhe'}';
+    app.toastFim(h, texto, erro: falhou && certos == 0, aviso: falhou && certos > 0);
+    if (certos > 0) app.notasMudaram();
+    if (!mounted) return;
+    setState(() => _rebuscando = false);
+    _carregar();
   }
 
   Widget _filtros(BuildContext context) {
@@ -321,9 +406,8 @@ class _TelaDashboardState extends State<TelaDashboard> {
           altura: TamanhosDashboard.base.altura,
           idLayout: TamanhosDashboard.base.id,
           aoSelecionar: (valor) {
-            final competencia = valor == 'competencia';
-            if (competencia == _competencia) return;
-            _competencia = competencia;
+            if (valor == null || valor == _base) return;
+            _base = valor;
             _carregar(limpar: true);
           },
         ),
@@ -404,7 +488,14 @@ class _TelaDashboardState extends State<TelaDashboard> {
                         ),
                       ],
                     ),
-                    _filtros(context),
+                    // Os rótulos flutuantes avançam acima da borda dos campos.
+                    Padding(
+                      padding: EdgeInsets.only(
+                        top: MediaQuery.textScalerOf(context)
+                                .scale(Letra.rotuloNaBorda) / 2 + 2,
+                      ),
+                      child: _filtros(context),
+                    ),
                   ],
                   quebra: true,
                   cruzado: CrossAxisAlignment.start,
@@ -420,6 +511,28 @@ class _TelaDashboardState extends State<TelaDashboard> {
                       : null,
                 ),
                 const SizedBox(height: 11),
+                if (_substPendentes > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: lin(
+                      [
+                        Icon(Icons.sync_problem, size: 18, color: corAviso),
+                        Flexible(
+                          child: Tx(
+                            _substEmConferencia
+                                ? 'Há substituições em conferência. Os totais podem mudar quando o Cofre for atualizado.'
+                                : _substPendentes == 1
+                                ? 'Uma substituição foi autorizada na SEFIN e aguarda a atualização do Cofre. Até lá, os totais podem incluir a nota substituída.'
+                                : '$_substPendentes substituições foram autorizadas na SEFIN e aguardam a atualização do Cofre. Até lá, os totais podem incluir as notas substituídas.',
+                            cor: corAviso,
+                            idLayout: 'Dashboard.avisoSubstituicao',
+                          ),
+                        ),
+                      ],
+                      espaco: 8,
+                      idLayout: 'Grupo.dashboard.lin.avisoSubstituicao',
+                    ),
+                  ),
                 if (_falha != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 14),
@@ -462,13 +575,18 @@ class _TelaDashboardState extends State<TelaDashboard> {
                         key: ValueKey((
                           dataIso(de),
                           dataIso(ate),
-                          _competencia,
+                          _base,
                           _comparativo,
                         )),
                         dados: dados.grafico,
                         mostrar: _mostrar,
                       ),
-                      _Composicao(dados: dados, mostrar: _mostrar),
+                      _Composicao(
+                        dados: dados,
+                        mostrar: _mostrar,
+                        rebuscando: _rebuscando,
+                        aoRebuscar: () => _rebuscarIlegiveis(dados.xmlIlegiveis),
+                      ),
                       pesoA: 7,
                       pesoB: 4,
                     ),
@@ -738,9 +856,16 @@ class _Indicador extends StatelessWidget {
 }
 
 class _Composicao extends StatelessWidget {
-  const _Composicao({required this.dados, required this.mostrar});
+  const _Composicao({
+    required this.dados,
+    required this.mostrar,
+    required this.rebuscando,
+    required this.aoRebuscar,
+  });
   final _Resumo dados;
   final bool mostrar;
+  final bool rebuscando;
+  final VoidCallback aoRebuscar;
 
   @override
   Widget build(BuildContext context) {
@@ -801,13 +926,31 @@ class _Composicao extends StatelessWidget {
             ),
             if (parcial) ...[
               const SizedBox(height: 8),
-              Tx(
-                mostrar
-                    ? '${dados.xmlIndisponiveis} de ${dados.total.notas} notas sem XML legível.'
-                    : 'Há notas sem XML legível.',
-                tam: Letra.apoio,
-                cor: cores.onSurfaceVariant,
-                idLayout: 'Dashboard.composicao.cobertura',
+              lin(
+                [
+                  Expanded(
+                    child: Tx(
+                      mostrar
+                          ? '${dados.xmlIndisponiveis} de ${dados.total.notas} notas sem XML legível.'
+                          : 'Há notas sem XML legível.',
+                      tam: Letra.apoio,
+                      cor: cores.onSurfaceVariant,
+                      idLayout: 'Dashboard.composicao.cobertura',
+                    ),
+                  ),
+                  if (dados.xmlIlegiveis.isNotEmpty)
+                    Botao.texto(
+                      rebuscando ? 'Buscando…' : 'Buscar na SEFIN',
+                      icone: Icons.cloud_download_outlined,
+                      compacto: true,
+                      desabilitado: rebuscando,
+                      dica: 'Busca de novo, pela chave de acesso, a NFS-e autorizada de cada nota cujo XML não abre e troca a cópia do Cofre.',
+                      aoClicar: aoRebuscar,
+                      idLayout: 'Dashboard.composicao.buscarXml',
+                    ),
+                ],
+                espaco: 6,
+                idLayout: 'Grupo.dashboard.lin.cobertura',
               ),
             ],
           ],

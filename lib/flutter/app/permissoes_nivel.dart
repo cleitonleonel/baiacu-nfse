@@ -424,6 +424,7 @@ void abrirPermissoesNivel(App app) {
                         Permissoes.aplicar(
                           jaMapa('permissoes.salvar', {'perfil': perfil()}),
                         );
+                        app.limparAutorizacoes();
                         app.fecharEsta(d);
                         app.atualizar();
                         app.toast('Permissões salvas.');

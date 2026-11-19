@@ -14,6 +14,8 @@ namespace {
 constexpr UINT kEventoBandeja = WM_APP + 1;
 constexpr UINT kIdIcone = 1;
 constexpr int kSair = 1;
+constexpr wchar_t kChaveInicializacao[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+constexpr wchar_t kNomeInicializacao[] = L"BaiacuNFSe";
 
 NOTIFYICONDATAW DadosDoIcone(HWND janela) {
   NOTIFYICONDATAW dados{};
@@ -21,6 +23,45 @@ NOTIFYICONDATAW DadosDoIcone(HWND janela) {
   dados.hWnd = janela;
   dados.uID = kIdIcone;
   return dados;
+}
+
+LSTATUS ComandoInicializacao(std::wstring* comando) {
+  wchar_t exe[32768] = {};
+  const DWORD tamanho = GetModuleFileNameW(nullptr, exe, ARRAYSIZE(exe));
+  if (tamanho == 0) return GetLastError();
+  // O Run aceita uma linha de comando de até 260 caracteres, com espaço para o terminador.
+  if (tamanho + 3 > MAX_PATH) return ERROR_FILENAME_EXCED_RANGE;
+  *comando = L"\"" + std::wstring(exe, tamanho) + L"\"";
+  return ERROR_SUCCESS;
+}
+
+LSTATUS LerInicializacao(const std::wstring& comando, bool* ativa) {
+  wchar_t valor[MAX_PATH] = {};
+  DWORD bytes = sizeof(valor);
+  const LSTATUS status = RegGetValueW(HKEY_CURRENT_USER, kChaveInicializacao,
+      kNomeInicializacao, RRF_RT_REG_SZ, nullptr, valor, &bytes);
+  *ativa = status == ERROR_SUCCESS && _wcsicmp(comando.c_str(), valor) == 0;
+  if (status == ERROR_FILE_NOT_FOUND || status == ERROR_MORE_DATA ||
+      status == ERROR_UNSUPPORTED_TYPE) return ERROR_SUCCESS;
+  return status;
+}
+
+LSTATUS GravarInicializacao(const std::wstring& comando, bool ativar, bool ativa) {
+  if (ativar == ativa) return ERROR_SUCCESS;
+  if (!ativar) {
+    const LSTATUS status = RegDeleteKeyValueW(HKEY_CURRENT_USER,
+        kChaveInicializacao, kNomeInicializacao);
+    return status == ERROR_FILE_NOT_FOUND ? ERROR_SUCCESS : status;
+  }
+  HKEY chave = nullptr;
+  LSTATUS status = RegCreateKeyExW(HKEY_CURRENT_USER, kChaveInicializacao,
+      0, nullptr, 0, KEY_SET_VALUE, nullptr, &chave, nullptr);
+  if (status != ERROR_SUCCESS) return status;
+  status = RegSetValueExW(chave, kNomeInicializacao, 0, REG_SZ,
+      reinterpret_cast<const BYTE*>(comando.c_str()),
+      static_cast<DWORD>((comando.size() + 1) * sizeof(wchar_t)));
+  RegCloseKey(chave);
+  return status;
 }
 }  // namespace
 
@@ -56,6 +97,28 @@ bool FlutterWindow::OnCreate() {
       flutter_controller_->engine()->messenger(), "baiacu/janela",
       &flutter::StandardMethodCodec::GetInstance());
   janela_->SetMethodCallHandler([this](const auto& chamada, auto resposta) {
+    const bool definir_inicio = chamada.method_name() == "definirInicializacaoAutomatica";
+    if (definir_inicio || chamada.method_name() == "inicializacaoAutomatica") {
+      const auto* ativar = chamada.arguments() ? std::get_if<bool>(chamada.arguments()) : nullptr;
+      if (definir_inicio && !ativar) {
+        resposta->Error("InicializacaoAutomatica", "Preferência de inicialização inválida.");
+        return;
+      }
+      std::wstring comando;
+      bool ativa = false;
+      LSTATUS status = ComandoInicializacao(&comando);
+      if (status == ERROR_SUCCESS) status = LerInicializacao(comando, &ativa);
+      if (status == ERROR_SUCCESS && definir_inicio) {
+        status = GravarInicializacao(comando, *ativar, ativa);
+        if (status == ERROR_SUCCESS) ativa = *ativar;
+      }
+      if (status == ERROR_SUCCESS) {
+        resposta->Success(flutter::EncodableValue(ativa));
+      } else {
+        resposta->Error("InicializacaoAutomatica", "O Windows não conseguiu acessar a preferência (código " + std::to_string(status) + ").");
+      }
+      return;
+    }
     if (chamada.method_name() == "encerrar") {
       // A saída já foi confirmada e arrumada pelo Dart. O motor do Flutter NÃO pode ser
       // destruído aqui dentro (estamos numa resposta dele) nem dentro do WM_DESTROY de um
@@ -121,7 +184,8 @@ bool FlutterWindow::AdicionarIcone(HWND window) {
   dados.uCallbackMessage = kEventoBandeja;
   dados.hIcon = ::LoadIconW(::GetModuleHandleW(nullptr),
                             MAKEINTRESOURCEW(IDI_APP_ICON));
-  wcscpy_s(dados.szTip, L"Baiacu NFS-e");
+  // O Shell identifica o ícone pelo par (HWND, uID). Cada janela tem seu próprio HWND.
+  swprintf_s(dados.szTip, L"Baiacu NFS-e \u00b7 janela %lu", GetCurrentProcessId());
   if (dados.hIcon == nullptr || !::Shell_NotifyIconW(NIM_ADD, &dados)) {
     return false;
   }

@@ -118,7 +118,13 @@ pub fn executar(metodo: &str, a: &Value) -> Option<Res<Value>> {
             let prestador = texto(a, "prestador")?;
             // O núcleo conclui a fila e faz o único envio automático de e-mail.
             // Repetir aqui duplicaria a mensagem para chamadas vindas do Dart/CLI.
-            emissao::reenviar_pendente(prestador, &p, texto_ou(a, "cert", ""))
+            let cert = texto_ou(a, "cert", "");
+            // Clientes antigos enviavam os mesmos argumentos no ciclo automático e no clique.
+            if a["automatico"].as_bool() == Some(false) {
+                emissao::reenviar_pendente(prestador, &p, cert)
+            } else {
+                emissao::reenviar_pendente_automaticamente(prestador, &p, cert)
+            }
         })(),
 
         // ---- substituição ---------------------------------------------------------------- //
@@ -172,13 +178,13 @@ pub fn executar(metodo: &str, a: &Value) -> Option<Res<Value>> {
                     .collect::<Vec<_>>()
             ))
         })(),
+        // true = o Cofre já reflete a substituição; false = autorizada na SEFIN, Cofre pendente.
         "emissao.marcar_substituida" => (|| {
-            emissao::marcar_substituida(
+            Ok(json!(emissao::concluir_substituicao(
                 texto(a, "prestador")?,
                 texto(a, "chave_antiga")?,
                 texto(a, "chave_nova")?,
-            )?;
-            Ok(Value::Null)
+            )?))
         })(),
 
         // ---- cancelamento ---------------------------------------------------------------- //

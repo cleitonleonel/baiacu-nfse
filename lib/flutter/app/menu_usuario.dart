@@ -14,6 +14,7 @@ import '../kit/arquivos.dart';
 import '../kit/campo.dart';
 import '../kit/flet.dart';
 import 'app.dart';
+import 'codigo_autorizacao.dart';
 
 /// Etiqueta do nível com a COR do nível (1 dourado, 2 laranja, 3 vermelho, 4 roxo).
 Widget chipNivel(int nivel, [String? texto]) => Ct(
@@ -257,6 +258,9 @@ void abrirMenuUsuario(App app) {
   var textoHover = 'Alterar foto';
   var temFotoSalva = false;
   var mostrarRemover = false;
+  // Código de autorização da conta: lido em segundo plano ao abrir a janela.
+  String? codigoAtual;
+  var codigoLido = false;
   try {
     temFotoSalva =
         ja<String?>('usuarios.get_foto', {'usuario_id': app.usuario.id}) !=
@@ -727,11 +731,59 @@ void abrirMenuUsuario(App app) {
     idLayout: 'Grupo.menu_usuario.col.4',
   );
 
+  Widget abaCodigo() => col(
+    [
+      col(
+        [
+          Tx(
+            !codigoLido
+                ? 'Carregando o código…'
+                : codigoAtual == null
+                ? 'Esta conta ainda não tem código de autorização.'
+                : 'Código atual: $codigoAtual',
+            tam: Letra.texto,
+            peso: FontWeight.w600,
+            idLayout: 'TamanhosMenuUsuario.rotuloCodigoAtual',
+          ),
+          Tx(
+            explicacaoCodigo,
+            tam: Letra.apoio,
+            cor: Colors.grey.shade700,
+            idLayout: 'TamanhosMenuUsuario.rotuloExplicacaoCodigo',
+          ),
+        ],
+        justa: true,
+        espaco: 8,
+        idLayout: 'Grupo.menu_usuario.col.codigo',
+      ),
+      lin([
+        const Expanded(child: SizedBox()),
+        Botao(
+          codigoAtual == null ? 'Definir código' : 'Trocar código',
+          icone: Icons.pin,
+          desabilitado: !codigoLido,
+          aoClicar: () => abrirDefinirCodigo(
+            app,
+            atual: codigoAtual,
+            aoSalvar: (novo) {
+              codigoAtual = novo;
+              d.atualizar();
+            },
+          ),
+          idLayout: 'TamanhosMenuUsuario.botaoTrocarCodigo',
+        ),
+      ], idLayout: 'Grupo.menu_usuario.lin.codigo'),
+    ],
+    justa: true,
+    principal: MainAxisAlignment.spaceBetween,
+    idLayout: 'Grupo.menu_usuario.col.codigoAba',
+  );
+
   d = Dialogo(
     titulo: (_) => app.tituloComX('Menu'),
     largura: 420,
     conteudo: (_) => DefaultTabController(
-      length: 2,
+      length: 3,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -746,10 +798,17 @@ void abrirMenuUsuario(App app) {
             tabs: const [
               Tab(text: 'Foto de perfil', icon: Icon(Icons.account_circle)),
               Tab(text: 'Redefinir senha', icon: Icon(Icons.lock_reset)),
+              Tab(text: 'Código de autorização', icon: Icon(Icons.pin)),
             ],
           ),
           divisor(altura: 1),
-          painel(aba == 0 ? abaFoto() : abaSenha()),
+          painel(
+            aba == 0
+                ? abaFoto()
+                : aba == 1
+                ? abaSenha()
+                : abaCodigo(),
+          ),
         ],
       ),
     ),
@@ -760,6 +819,16 @@ void abrirMenuUsuario(App app) {
   fConf = d.texto();
   d.aoDescartar(() => img?.dispose());
   app.mostrarDialogo(d);
+  chamar<String?>('usuarios.codigo_proprio')
+      .then((c) => codigoAtual = (c == null || c.isEmpty) ? null : c)
+      .catchError((Object e) {
+        registrar('Não foi possível ler o código de autorização: $e', nivel: 'error');
+        return null;
+      })
+      .whenComplete(() {
+        codigoLido = true;
+        d.atualizar();
+      });
 
   // Foto atual (se houver) já entra carregada para re-enquadrar.
   if (temFotoSalva) {

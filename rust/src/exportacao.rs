@@ -49,6 +49,7 @@ pub struct Opcoes {
     pub incluir_eventos: bool,
     pub formatos: Vec<String>,
     pub por_competencia: bool,
+    pub por_movimento: bool,
     pub por_mes: bool,
     pub por_tipo: bool,
 }
@@ -69,6 +70,7 @@ impl Default for Opcoes {
             incluir_eventos: false,
             formatos: Vec::new(),
             por_competencia: false,
+            por_movimento: false,
             por_mes: false,
             por_tipo: false,
         }
@@ -92,6 +94,7 @@ pub struct Registro {
     pub nDPS: String,
     pub serie: String,
     pub dCompet: String,
+    pub movimento: String,
     pub tpAmb: String,
     pub nota_id: i64,
     pub cancelada: bool,
@@ -122,6 +125,7 @@ fn registro(n: Nota, grupos: &HashMap<String, String>) -> Registro {
         nDPS: String::new(),
         serie: String::new(),
         dCompet: n.dCompet,
+        movimento: n.movimento,
         tpAmb: n.amb,
         nota_id: n.id,
         cancelada: n.cancelada,
@@ -139,6 +143,7 @@ pub fn pagina(prestador: &str, o: &Opcoes, limite: i64, offset: i64) -> Res<(i64
     let filtro = Filtro {
         origem: "local".into(),
         por_competencia: o.por_competencia,
+        por_movimento: o.por_movimento,
         docs: o.tomadores.clone(),
         ini: o.ini.clone(),
         fim: o.fim.clone(),
@@ -365,7 +370,7 @@ pub fn exportar(
                 (
                     format!(
                         "Período por {}: {} a {}",
-                        if o.por_competencia { "competência" } else { "emissão" },
+                        if o.por_movimento { "movimento" } else if o.por_competencia { "competência" } else { "emissão" },
                         data_br(&o.ini, "início"),
                         data_br(&o.fim, "hoje")
                     ),
@@ -387,6 +392,7 @@ pub fn exportar(
             }
             let sem_filtros = Opcoes {
                 por_competencia: o.por_competencia,
+        por_movimento: o.por_movimento,
                 ini: o.ini.clone(),
                 fim: o.fim.clone(),
                 ..Default::default()
@@ -501,6 +507,7 @@ pub fn exportar_xmls(
 fn filtro_cofre(o: &Opcoes, limite: i64) -> Filtro {
     Filtro {
         por_competencia: o.por_competencia,
+        por_movimento: o.por_movimento,
         papel: o.papel.clone(),
         amb: o.ambiente.clone(),
         ini: o.ini.clone(),
@@ -528,7 +535,7 @@ fn pasta(n: &Nota, o: &Opcoes) -> (String, String) {
             String::new()
         },
         if o.por_mes {
-            let data = if o.por_competencia { &n.dCompet } else { &n.dt };
+            let data = if o.por_movimento { n.movimento.split('T').next().unwrap_or_default() } else if o.por_competencia { &n.dCompet } else { &n.dt };
             texto::parse_iso_date(data)
                 .map(|data| data.format("%Y-%m").to_string())
                 .unwrap_or_else(|| "sem-data".into())
@@ -610,7 +617,7 @@ pub fn exportar_cofre(prestador: &str, destino: &Path, o: &Opcoes, a: &Acompanha
             cadastro::ambiente_rotulo(&o.ambiente).unwrap_or(&o.ambiente)
         ));
     }
-    filtros.push(if o.por_competencia { "Período por competência" } else { "Período por emissão/processamento" }.into());
+    filtros.push(if o.por_movimento { "Período por movimento" } else if o.por_competencia { "Período por competência" } else { "Período por emissão/processamento" }.into());
     if !o.situacao.is_empty() {
         filtros.push(format!(
             "Só as {}",

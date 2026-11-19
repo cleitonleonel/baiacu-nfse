@@ -52,6 +52,14 @@ fn rejeitada(msg: String, status: Option<i64>, corpo: &Value) -> Erro {
     Erro::novo("EmissionRejected", msg).com_dados(json!({ "status_code": status, "body": corpo }))
 }
 
+fn rejeicao_definitiva(e: &Erro) -> bool {
+    if e.tipo != "EmissionRejected" || !matches!(e.dado("status_code").as_i64(), Some(400 | 422)) {
+        return false;
+    }
+    let codigos = codigos_erro(e.dado("body"));
+    !codigos.is_empty() && !codigos.iter().any(|c| c == "E0014")
+}
+
 /// Falha de TRANSMISSÃO (sem internet / SEFIN indisponível): a DPS foi construída, validada e
 /// ASSINADA, mas o envio não foi aceito por indisponibilidade — dá para reenviar depois (fila de
 /// contingência). Leva o que a fila precisa. `chave` preenchida = a SEFIN JÁ ACEITOU a nota (só
@@ -82,6 +90,10 @@ fn pendente(msg: String, p: Pendencia) -> Erro {
         ..p
     };
     Erro::novo("TransmissionPending", msg).com_dados(serde_json::to_value(p).unwrap_or(Value::Null))
+}
+
+fn substituicao_pendente(msg: impl Into<String>) -> Erro {
+    Erro::novo("SubstituicaoPendente", msg)
 }
 
 // --------------------------------------------------------------------------------------------- //
@@ -622,6 +634,32 @@ fn xml_da_resposta(corpo: &Value) -> Res<Vec<u8>> {
     Err(Erro::valor("Retorno do download não contém XML."))
 }
 
+fn conferir_xml_substituta(
+    raiz: &xml::Elemento,
+    chave: &str,
+    ambiente: &str,
+    id_dps: &str,
+    antiga: &str,
+) -> Res<()> {
+    let nota = raiz.achar("infNFSe");
+    let dps = nota.and_then(|n| n.achar_caminho(&["DPS", "infDPS"]));
+    let id_nota = nota.and_then(|n| n.attr("Id")).unwrap_or_default();
+    let campo = |caminho: &[&str]| {
+        dps.and_then(|d| d.achar_caminho(caminho))
+            .map(|e| aparar(e.texto_inicial()))
+            .unwrap_or_default()
+    };
+    if raiz.nome != "NFSe"
+        || only_chave(id_nota.strip_prefix("NFS").unwrap_or(id_nota)) != chave
+        || dps.and_then(|d| d.attr("Id")) != Some(id_dps)
+        || campo(&["tpAmb"]) != ambiente
+        || campo(&["subst", "chSubstda"]) != antiga
+    {
+        return Err(Erro::valor("O XML baixado não confirma esta substituição. A DPS continua na fila para conferência."));
+    }
+    Ok(())
+}
+
 // --------------------------------------------------------------------------------------------- //
 // Uma emissão em andamento
 // --------------------------------------------------------------------------------------------- //
@@ -810,7 +848,7 @@ impl Andamento {
 
     /// Depois do aceite: pega o XML autorizado (o que veio na própria resposta do POST, ou por
     /// GET) e o guarda no banco de notas.
-    fn receber_nota(&mut self, corpo: &Value, id_dps: &str) -> Res<Value> {
+    fn receber_nota(&mut self, corpo: &Value, id_dps: &str, substituida: &str) -> Res<Value> {
         // O ambiente de download é o mesmo em que emitimos (tpAmb da DPS), não o que vier no corpo
         // da resposta — nem a 8ª posição da chave, que é o ambiente GERADOR.
         let ambiente = self.tp_amb()?;
@@ -861,6 +899,9 @@ impl Andamento {
             }
         };
         let raiz = xml::ler(&xml_bytes)?;
+        if !substituida.is_empty() {
+            conferir_xml_substituta(&raiz, &chave, &ambiente, id_dps, substituida)?;
+        }
         let n_nfse = raiz
             .todos()
             .into_iter()
@@ -921,7 +962,13 @@ impl Andamento {
         Ok(r)
     }
 
-    fn rodar(&mut self, preparar: Option<&dyn Fn(Pendencia) -> Res<Value>>) -> Res<Value> {
+    fn rodar(
+        &mut self,
+        preparar: Option<&dyn Fn(Pendencia) -> Res<Value>>,
+        tomador: &str,
+        servico: &str,
+        valor: &str,
+    ) -> Res<Value> {
         self.registro.evento("run", "iniciando workflow", json!({}));
         // montar
         self.registro.evento(
@@ -1000,16 +1047,34 @@ impl Andamento {
             json!({ "payload_path": "", "dpsXmlGZipB64_len": payload_b64.len() }),
         );
 
+        // A DPS de substituição já precisa existir na fila se o processo parar durante o POST.
+        let antiga = only_chave(&self.cfg.val("subst", "chSubstda", ""));
+        let mut subst = if antiga.is_empty() {
+            None
+        } else {
+            let exc = self.pendencia(&montada.n_dps, &montada.serie, &montada.id_dps, &assinado, None, "");
+            let (p, _) = preparar_pendente(
+                &self.prestador, tomador, servico, &self.cfg.val("toma", "xNome", ""),
+                valor, &exc, &json!({
+                    "chave": antiga,
+                    "cMotivo": self.cfg.val("subst", "cMotivo", ""),
+                    "xMotivo": self.cfg.val("subst", "xMotivo", ""),
+                }),
+            )?;
+            reservar_substituicao(&self.prestador, &p, &assinado, &self.config_texto, &self.last_dps)?;
+            Some(p)
+        };
+
         // enviar — a falha de transmissão sai CLASSIFICADA (pendência para a fila quando é
         // indisponibilidade; rejeição quando a SEFIN recusou de fato)
-        let resposta = match self.enviar_ou_classificar(
+        let envio = (|| match self.enviar_ou_classificar(
             &payload_b64,
             &montada.n_dps,
             &montada.serie,
             &montada.id_dps,
             &assinado,
         ) {
-            Ok(r) => r,
+            Ok(r) => Ok(r),
             Err(e) if e.tipo == "EmissionRejected" => {
                 // E0014 = esta DPS (CNPJ+série+nDPS) já virou NFS-e num envio anterior, ex.: o
                 // contador local ficou atrás da SEFIN. Sem este tratamento a emissão fica travada
@@ -1043,9 +1108,24 @@ impl Andamento {
                     json!({ "chaveAcesso": chave_anterior, "nDPS": montada.n_dps }),
                 );
                 self.recuperada_e0014 = true;
-                json!({ "status_code": 200, "reason": "recuperado-E0014", "body": { "chaveAcesso": chave_anterior } })
+                Ok(json!({ "status_code": 200, "reason": "recuperado-E0014", "body": { "chaveAcesso": chave_anterior } }))
             }
-            Err(e) => return Err(e),
+            Err(e) => Err(e),
+        })();
+        let resposta = match (envio, &subst) {
+            (Ok(r), _) => r,
+            (Err(e), Some(p)) if rejeicao_definitiva(&e) => {
+                retirar_da_fila(&self.prestador, &p.id, "fila")?;
+                return Err(e);
+            }
+            (Err(e), Some(p)) => {
+                let mut p = p.clone();
+                marcar_falha(&self.prestador, &mut p, &e.msg, "fila");
+                return Err(substituicao_pendente(format!(
+                    "A SEFIN ainda não confirmou a substituição. A DPS está na fila em Consultar para conferência. {e}"
+                )));
+            }
+            (Err(e), None) => return Err(e),
         };
 
         // ------------------------------------------------------------------
@@ -1055,15 +1135,24 @@ impl Andamento {
         // ------------------------------------------------------------------
         let corpo = resposta.get("body").cloned().unwrap_or(Value::Null);
         let chave = chave_da_resposta(&corpo);
-        let pos_aceite = (|| -> Res<(Value, Value)> {
+        let pos_aceite = (|| -> Res<(Value, Value, bool)> {
+            if let Some(p) = subst.as_mut() {
+                p.chave.clone_from(&chave);
+                gravar_meta(&self.prestador, p, "fila")?;
+            }
             let n: i64 = aparar(&montada.n_dps)
                 .parse()
                 .map_err(|_| Erro::valor(format!("nDPS emitido inválido: {}", montada.n_dps)))?;
             let numeracao = self.avancar_numeracao(n)?;
-            let nota = self.receber_nota(&corpo, &montada.id_dps)?;
-            Ok((numeracao, nota))
+            let nota = self.receber_nota(&corpo, &montada.id_dps, &antiga)?;
+            let mut cofre_pendente = false;
+            if let Some(p) = &subst {
+                cofre_pendente = !concluir_substituicao(&self.prestador, &antiga, &chave)?;
+                retirar_da_fila(&self.prestador, &p.id, "fila")?;
+            }
+            Ok((numeracao, nota, cofre_pendente))
         })();
-        let (numeracao, nota) = match pos_aceite {
+        let (numeracao, nota, cofre_pendente) = match pos_aceite {
             Ok(x) => x,
             Err(e) => {
                 self.registro.evento(
@@ -1071,6 +1160,13 @@ impl Andamento {
                     "NFS-e ACEITA, mas o pós-aceite falhou",
                     json!({ "chaveAcesso": chave, "nDPS": montada.n_dps, "error": e.msg }),
                 );
+                if subst.is_some() {
+                    // A linha já existia antes do envio. Se falhou ao gravar a chave, a próxima
+                    // conferência recupera a chave pelo ID da DPS.
+                    return Err(substituicao_pendente(format!(
+                        "O pós-envio da substituição ficou pendente. Confira a DPS na fila em Consultar. {e}"
+                    )));
+                }
                 if chave.is_empty() {
                     // Sem chave não dá para enfileirar. Erro EXPLÍCITO: nunca sugerir reemissão.
                     return Err(erro_de_emissao(
@@ -1102,7 +1198,7 @@ impl Andamento {
                 ));
             }
         };
-        let resultado = json!({
+        let mut resultado = json!({
             "build": { "idDps": montada.id_dps, "nDPS": montada.n_dps, "serie": montada.serie, "warnings": [], "unsigned_xml": "" },
             "validate": validacao_r,
             "sign": sanitizar(&assinatura_r, ""),
@@ -1113,6 +1209,9 @@ impl Andamento {
             "recuperada_e0014": self.recuperada_e0014,
             "log_path": self.registro.caminho(),
         });
+        if cofre_pendente {
+            resultado["subst_cofre_pendente"] = json!(true);
+        }
         self.registro
             .evento("run", "workflow finalizado", json!({}));
         self.registro.gravar(Some(true), None);
@@ -1257,7 +1356,7 @@ pub(crate) fn emitir_com_preparo(
         numero_atual: None,
         recuperada_e0014: false,
     };
-    match a.rodar(preparar) {
+    match a.rodar(preparar, tomador, servico, &form.vServ) {
         Ok(resultado) if preparar.is_some() => Ok(resultado),
         Ok(mut resultado) => {
             let info = json!({
@@ -1285,7 +1384,7 @@ pub(crate) fn emitir_com_preparo(
             a.registro.falhou(&e);
             match e.tipo {
                 // já levam o que quem chamou precisa: não embrulhar
-                "TransmissionPending" | "EmissionRejected" => Err(e),
+                "TransmissionPending" | "EmissionRejected" | "SubstituicaoPendente" => Err(e),
                 _ => Err(erro_de_emissao(
                     e.msg,
                     Some(&a.registro.caminho()),
@@ -1357,9 +1456,51 @@ fn gravar_pendente(
     config: &str,
 ) -> Res<()> {
     let con = banco::conn()?;
-    con.execute(
-        "INSERT OR REPLACE INTO pendente (prestador, id, situacao, meta, xml, config) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    let gravadas = con.execute(
+        "INSERT INTO pendente (prestador, id, situacao, meta, xml, config) VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+         ON CONFLICT(prestador,id,situacao) DO UPDATE SET meta=excluded.meta, xml=excluded.xml, config=excluded.config \
+         WHERE pendente.situacao <> 'fila' OR CASE WHEN json_valid(pendente.meta) \
+             THEN COALESCE(json_extract(pendente.meta, '$.subst_chave'), '') = '' ELSE 1 END",
         params![prestador, id, situacao, meta, xml_bytes, config],
+    )?;
+    if gravadas == 0 {
+        return Err(Erro::valor("Este número de DPS já está reservado para uma substituição na fila."));
+    }
+    Ok(())
+}
+
+fn reservar_substituicao(
+    prestador: &str,
+    p: &PendenteInfo,
+    xml: &[u8],
+    config: &str,
+    contador: &str,
+) -> Res<()> {
+    let mut con = banco::conn()?;
+    let tx = con.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let ja_pendente: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pendente WHERE prestador=?1 AND situacao IN ('fila', 'lote') \
+           AND (id=?2 OR CASE WHEN json_valid(meta) THEN json_extract(meta, '$.subst_chave') END=?3)) \
+         OR EXISTS(SELECT 1 FROM subst_pendente WHERE prestador=?1 AND chave_antiga=?3)",
+        params![prestador, p.id, p.subst_chave],
+        |r| r.get(0),
+    )?;
+    if ja_pendente {
+        return Err(substituicao_pendente("Já existe uma substituição pendente para esta nota ou para este número de DPS. Confira a fila em Consultar e sincronize o Cofre."));
+    }
+    tx.execute(
+        "INSERT INTO pendente (prestador, id, situacao, meta, xml, config) VALUES (?1, ?2, 'fila', ?3, ?4, ?5)",
+        params![prestador, p.id, meta_de(p), xml, config],
+    )?;
+    banco::reservar_contador_em(&tx, contador, numero_da_dps(&p.n_dps)?)?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn retirar_da_fila(prestador: &str, id: &str, situacao: &str) -> Res<()> {
+    banco::conn()?.execute(
+        "DELETE FROM pendente WHERE prestador=?1 AND id=?2 AND situacao=?3",
+        params![prestador, id, situacao],
     )?;
     Ok(())
 }
@@ -1559,6 +1700,11 @@ pub fn cancelar_pendente(prestador: &str, p: &PendenteInfo, forcar: bool) -> Res
         let Some(meta) = meta else {
             return Ok(json!({ "numero": p.n_dps, "reaproveitado": false, "ja_enviada": true }));
         };
+        if serde_json::from_str::<PendenteInfo>(&meta)
+            .is_ok_and(|p| !p.subst_chave.is_empty())
+        {
+            return Err(Erro::valor("Esta DPS é de uma substituição pendente. Use Reenviar para conferir o resultado com a SEFIN."));
+        }
         // relê a chave do BANCO, não do objeto da linha
         chave = match serde_json::from_str::<Value>(&meta) {
             Ok(v) if v.is_object() => {
@@ -1625,35 +1771,51 @@ fn marcar_falha(prestador: &str, p: &mut PendenteInfo, erro: &str, situacao: &st
 /// Sucesso remove da fila. Indisponibilidade volta como pendência (fica na fila); outras
 /// rejeições 4xx voltam como rejeição (o usuário decide cancelar).
 pub fn reenviar_pendente(prestador: &str, p: &PendenteInfo, cert: &str) -> Res<Value> {
-    entregar_pendente(prestador, p, cert, "fila", false)
+    entregar_pendente(prestador, p, cert, "fila", ModoReenvio::Manual)
+}
+
+pub(crate) fn reenviar_pendente_automaticamente(prestador: &str, p: &PendenteInfo, cert: &str) -> Res<Value> {
+    entregar_pendente(prestador, p, cert, "fila", ModoReenvio::Automatico)
+}
+
+/// Retoma substituições interrompidas com consultas e downloads. O POST fica no reenvio manual.
+pub(crate) fn recuperar_substituicoes_enfileiradas(prestador: &str, ambiente: Option<&str>) -> Res<usize> {
+    let mut recuperadas = 0;
+    for p in list_pendentes(prestador)? {
+        if p.subst_chave.is_empty() || ambiente.is_some_and(|amb| amb != p.tp_amb) {
+            continue;
+        }
+        let cert = if p.cert.is_empty() { cadastro::active_cert(prestador)? } else { p.cert.clone() };
+        match entregar_pendente(prestador, &p, &cert, "fila", ModoReenvio::Conferir) {
+            Ok(_) => recuperadas += 1,
+            Err(e) if e.tipo == "DpsNaoLocalizada" => {}
+            Err(e) => {
+                registro::aviso("cofre", &format!("Substituição ainda pendente na fila: {e}"));
+                break;
+            }
+        }
+    }
+    Ok(recuperadas)
 }
 
 pub(crate) fn entregar_pendente_do_lote(
     prestador: &str, p: &PendenteInfo, so_conferir: bool,
 ) -> Res<Value> {
-    entregar_pendente(prestador, p, &p.cert, "lote", so_conferir)
+    let modo = if so_conferir { ModoReenvio::Conferir } else { ModoReenvio::Manual };
+    entregar_pendente(prestador, p, &p.cert, "lote", modo)
+}
+
+enum ModoReenvio {
+    Manual,
+    Automatico,
+    Conferir,
 }
 
 fn entregar_pendente(
-    prestador: &str, p: &PendenteInfo, cert: &str, situacao: &str, so_conferir: bool,
+    prestador: &str, p: &PendenteInfo, cert: &str, situacao: &str, modo: ModoReenvio,
 ) -> Res<Value> {
     let trava = travar();
     let mut p = p.clone();
-    // A DPS já está assinada: o reenvio autentica com o MESMO certificado que a assinou.
-    let cert = if p.cert.is_empty() {
-        cert.to_string()
-    } else if cadastro::list_certificados(prestador)?.contains(&p.cert) {
-        p.cert.clone()
-    } else {
-        return Err(Erro::valor(format!(
-            "Esta DPS foi assinada com um certificado que não está mais cadastrado ({}). Importe-o de novo em Configurações > Certificado para reenviar, ou cancele o envio na fila.",
-            p.cert
-        )));
-    };
-    let cert = cert.as_str();
-    let Some(senha) = cadastro::read_cert_password(prestador, Some(cert))? else {
-        return Err(Erro::valor("Senha do certificado não encontrada no banco."));
-    };
     let linha: Option<(Vec<u8>, Option<String>, String)> = {
         let con = banco::conn()?;
         con.query_row(
@@ -1666,9 +1828,26 @@ fn entregar_pendente(
     let Some((assinado, config_final, meta)) = linha else {
         return Err(Erro::valor("Este envio não está mais na fila."));
     };
-    if let Ok(atual) = serde_json::from_str::<PendenteInfo>(&meta) {
-        p.chave = atual.chave;
+    if let Ok(atual) = serde_json::from_str::<PendenteInfo>(&meta)
+        && atual.id == p.id
+    {
+        p = atual;
     }
+    // A DPS já está assinada: o reenvio autentica com o mesmo certificado que a assinou.
+    let cert = if p.cert.is_empty() {
+        cert.to_string()
+    } else if cadastro::list_certificados(prestador)?.contains(&p.cert) {
+        p.cert.clone()
+    } else {
+        return Err(Erro::valor(format!(
+            "Esta DPS foi assinada com um certificado que não está mais cadastrado ({}). Importe-o de novo em Configurações > Certificado para concluir o envio.",
+            p.cert
+        )));
+    };
+    let cert = cert.as_str();
+    let Some(senha) = cadastro::read_cert_password(prestador, Some(cert))? else {
+        return Err(Erro::valor("Senha do certificado não encontrada no banco."));
+    };
     let config_final = config_final.unwrap_or_default();
     if config_final.is_empty() {
         return Err(Erro::valor(
@@ -1708,18 +1887,24 @@ fn entregar_pendente(
         numero_atual: None,
         recuperada_e0014: false,
     };
+    let antiga = only_chave(&a.cfg.val("subst", "chSubstda", &p.subst_chave));
+    let so_conferir = matches!(modo, ModoReenvio::Conferir)
+        || matches!(modo, ModoReenvio::Automatico) && !antiga.is_empty();
     let (oficial, chave) = {
         let feito = (|| -> Res<(Value, String)> {
             let mut chave = aparar(&p.chave).to_string();
-            if so_conferir && chave.is_empty() {
+            if chave.is_empty() && (so_conferir || !antiga.is_empty()) {
                 let consulta = a.consultar_dps(&p.id_dps, &p.tp_amb)?;
-                chave = chave_da_resposta(consulta.get("body").unwrap_or(&Value::Null));
-                if chave.is_empty() {
-                    return Err(if consulta["status_code"] == 404 {
-                        Erro::novo("DpsNaoLocalizada", "A SEFIN não localizou a DPS.")
-                    } else {
-                        Erro::valor("A SEFIN não confirmou o estado da DPS. Tente novamente quando a consulta estiver disponível.")
-                    });
+                if sucesso(&consulta) {
+                    chave = chave_da_resposta(consulta.get("body").unwrap_or(&Value::Null));
+                }
+                if chave.is_empty() && consulta["status_code"] == 404 {
+                    if so_conferir {
+                        return Err(Erro::novo("DpsNaoLocalizada", "A SEFIN não localizou a DPS."));
+                    }
+                    // Reenvio manual: a tentativa continua usando a mesma DPS assinada.
+                } else if chave.is_empty() {
+                    return Err(Erro::valor("A SEFIN não confirmou o estado da DPS. Tente novamente quando a consulta estiver disponível."));
                 }
             }
             if chave.is_empty() {
@@ -1761,6 +1946,10 @@ fn entregar_pendente(
                             )));
                         }
                     }
+                    Err(e) if situacao == "fila" && !antiga.is_empty() && rejeicao_definitiva(&e) => {
+                        retirar_da_fila(prestador, &p.id, situacao)?;
+                        return Err(e);
+                    }
                     Err(e) => return Err(e),
                 }
             }
@@ -1770,7 +1959,7 @@ fn entregar_pendente(
                 p.chave = chave.clone();
                 gravar_meta(prestador, &p, situacao)?;
             }
-            let oficial = a.receber_nota(&json!({ "chaveAcesso": chave }), &p.id_dps)?;
+            let oficial = a.receber_nota(&json!({ "chaveAcesso": chave }), &p.id_dps, &antiga)?;
             // o contador já foi reservado no enfileiramento; a atualização nunca regride
             a.avancar_numeracao(numero_da_dps(&p.n_dps)?)?;
             Ok((oficial, chave))
@@ -1785,6 +1974,8 @@ fn entregar_pendente(
             }
         }
     };
+    // A fila só sai depois de o Cofre refletir o aceite ou de a pendência estar salva no dados.db.
+    let subst_pendente = !antiga.is_empty() && !concluir_substituicao(prestador, &antiga, &chave)?;
     {
         let mut con = banco::conn()?;
         let tx = con.transaction()?;
@@ -1796,11 +1987,10 @@ fn entregar_pendente(
         tx.commit()?;
     }
     drop(trava);
-    // Emissão de substituição concluída: marca a nota ANTIGA como substituída pela nova.
-    if !p.subst_chave.is_empty() {
-        let _ = marcar_substituida(prestador, &p.subst_chave, &chave); // não pode desfazer o sucesso do envio
-    }
     let mut resultado = json!({ "official_nfse": oficial, "log_path": a.registro.caminho(), "chave": chave, "tp_amb": p.tp_amb, "tomador": p.tomador });
+    if subst_pendente {
+        resultado["subst_cofre_pendente"] = json!(true);
+    }
     if situacao == "lote" {
         return Ok(resultado);
     }
@@ -1934,6 +2124,77 @@ pub fn subst_pairs(prestador: &str) -> Res<Vec<(String, String)>> {
 /// constar cancelada e apontando para a substituta. Idempotente.
 pub fn marcar_substituida(prestador: &str, chave_antiga: &str, chave_nova: &str) -> Res<()> {
     cofre::marcar_substituida(prestador, chave_antiga, chave_nova)
+}
+
+/// Busca a NFS-e na SEFIN: (ambiente, chave) -> registro da resposta. Nos testes, respostas
+/// prontas; no programa, `GET /nfse/{chave}` com o certificado do prestador.
+pub type BuscarNfse<'a> = &'a dyn Fn(&str, &str) -> Res<Value>;
+
+fn falha_da_nota(msg: impl Into<String>) -> Erro {
+    Erro::valor(msg).com_dados(json!({"falha_da_nota": true}))
+}
+
+/// O XML guardado de uma nota não abre (ou sumiu): busca de novo a NFS-e autorizada na SEFIN pela
+/// chave e troca a cópia do Cofre. A SEFIN entrega a nota a quem aparece nela como prestador,
+/// tomador ou intermediário, com o certificado desse participante: vale para emitidas e
+/// recebidas. Nada é transmitido nem alterado na SEFIN.
+pub fn rebuscar_nfse(dono: &str, nota_id: i64, buscar: Option<BuscarNfse>) -> Res<Value> {
+    let Some(nota) = cofre::nota_por_id(nota_id)? else {
+        return Err(falha_da_nota("Esta nota não está mais no banco de notas."));
+    };
+    // Antes de ir à SEFIN: a nota precisa ser deste prestador (o certificado é o dele).
+    if cofre::nota_por_chave(dono, &nota.chave)?.map(|n| n.id) != Some(nota_id) {
+        return Err(Erro::valor("Esta nota pertence a outro prestador."));
+    }
+    if cadastro::ambiente_rotulo(&nota.amb).is_none() {
+        return Err(falha_da_nota("O ambiente desta nota não está no banco de notas."));
+    }
+    let chave = only_chave(&nota.chave);
+    if chave.chars().count() != 50 {
+        return Err(falha_da_nota("A chave de acesso desta nota está incompleta no banco de notas."));
+    }
+    let resposta = match buscar {
+        Some(f) => f(&nota.amb, &chave)?,
+        None => {
+            let Some(material) = material_do_certificado(dono, "")? else {
+                return Err(Erro::valor(SEM_CERTIFICADO));
+            };
+            let url = format!("{}/nfse/{chave}", url_base(&nota.amb)?);
+            Sessao::nova(Some(&material), Tempo::igual(TEMPO_SEFIN), IDENTIFICACAO, false)?
+                .get(&url, &[("Accept", "application/json, application/xml, text/xml, */*")])?
+                .registro()
+        }
+    };
+    if !sucesso(&resposta) {
+        let status = resposta.get("status_code").and_then(Value::as_i64).unwrap_or(0);
+        let corpo = resposta.get("body").cloned().unwrap_or(Value::Null);
+        let msg = match status {
+            404 | 403 => format!(
+                "A SEFIN não entregou esta NFS-e (HTTP {status}). Ela só é entregue ao prestador, ao tomador ou ao intermediário da nota, com o certificado deles. {}",
+                resumo_do_corpo(&corpo)
+            ),
+            429 => "A SEFIN limitou as requisições (HTTP 429). Aguarde e tente novamente.".into(),
+            s if s >= 500 || s == 0 => format!("SEFIN indisponível (HTTP {status}). Tente novamente mais tarde."),
+            _ => format!("A SEFIN recusou a busca (HTTP {status}): {}", resumo_do_corpo(&corpo)),
+        };
+        return Err(if status == 404 { falha_da_nota(msg) } else { Erro::valor(msg) });
+    }
+    let xml_bytes = xml_da_resposta(resposta.get("body").unwrap_or(&Value::Null))
+        .map_err(|e| falha_da_nota(e.msg))?;
+    let feito = cofre::trocar_xml_ilegivel(dono, nota_id, &xml_bytes)?;
+    if feito == "trocado" {
+        crate::registro::info(
+            "cofre",
+            &format!("XML da NFS-e {chave} buscado de novo na SEFIN e trocado no Cofre."),
+        );
+    }
+    Ok(json!({ "resultado": feito, "chave": chave }))
+}
+
+/// Depois do aceite da substituta: true = o Cofre já mostra a antiga como substituída; false =
+/// a atualização do Cofre ficou pendente (ver `cofre::concluir_substituicao`).
+pub fn concluir_substituicao(prestador: &str, chave_antiga: &str, chave_nova: &str) -> Res<bool> {
+    cofre::concluir_substituicao(prestador, chave_antiga, chave_nova)
 }
 
 // --------------------------------------------------------------------------------------------- //

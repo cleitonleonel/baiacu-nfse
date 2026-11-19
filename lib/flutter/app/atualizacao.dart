@@ -13,7 +13,6 @@ final _avisoExibido = Expando<String>();
 
 const _verde = Color(0xFF15803D);
 
-
 /// Procura versão nova. [automatica]: a procura sozinha ao entrar (respeita o intervalo, a
 /// opção desligada e a versão pulada, e nunca mostra erro). Manual: sempre consulta e diz o
 /// resultado.
@@ -117,7 +116,7 @@ class BotaoAtualizacao extends StatelessWidget {
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6),
             child: Tooltip(
-              message: 'Clique para ver o que mudou e atualizar.',
+              message: 'Clique para abrir as opções de atualização.',
               child: InkWell(
                 mouseCursor: SystemMouseCursors.click,
                 borderRadius: BorderRadius.circular(20),
@@ -156,7 +155,7 @@ class BotaoAtualizacao extends StatelessWidget {
       );
 }
 
-/// A janela da versão nova: o que mudou, e "Atualizar agora" / "Depois" / "Pular esta versão".
+/// A janela da versão nova com acesso à página da release e opções de atualização.
 void abrirAtualizacao(App app) {
   final info = atualizacaoDisponivel.value;
   if (info == null) return;
@@ -167,14 +166,33 @@ void abrirAtualizacao(App app) {
   final versao = '${info['versao'] ?? ''}';
   if (app.dialogos.any((d) => d.marcador == 'atualizacao_disponivel')) return;
   _avisoExibido[app] = versao;
-  final notas = '${info['notas'] ?? ''}'.trim();
+  final pagina = '${info['pagina'] ?? ''}'.trim();
   final instalavel = info['instalavel'] == true;
   final mb = ((info['tamanho'] as num?) ?? 0) / 1048576;
+  var pulando = false;
+  void abrirPagina() {
+    try {
+      abrirEndereco(pagina);
+    } catch (e) {
+      app.toast('$e', erro: true);
+    }
+  }
+
   late final Dialogo d;
   d = Dialogo(
     largura: 620,
     marcador: 'atualizacao_disponivel',
-    titulo: (_) => app.tituloComX('Versão $versao disponível'),
+    titulo: (_) => LinhaTitulo([
+      Expanded(child: textoTitulo('Versão $versao disponível')),
+      BotaoIcone(
+        Icons.close,
+        dica: 'Fechar (Esc)',
+        aoClicar: () => app.fecharEsta(d),
+        largura: TamanhosDialogos.botaoFecharEsc.largura,
+        altura: TamanhosDialogos.botaoFecharEsc.altura,
+        idLayout: TamanhosDialogos.botaoFecharEsc.id,
+      ),
+    ]),
     conteudo: (context) {
       final esquema = Theme.of(context).colorScheme;
       return Column(
@@ -187,24 +205,20 @@ void abrirAtualizacao(App app) {
             '${mb > 0 ? ' Download de ${mb.toStringAsFixed(0)} MB.' : ''}',
             style: const TextStyle(fontSize: Letra.texto),
           ),
-          const SizedBox(height: 12),
-          Text(
-            'O que mudou',
-            style: const TextStyle(
-              fontSize: Letra.subtitulo,
-              fontWeight: FontWeight.w700,
+          if (instalavel && pagina.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Botao.texto(
+                'Ver notas da versão no GitHub',
+                icone: Icons.open_in_new,
+                aoClicar: abrirPagina,
+                largura: TamanhosDialogos.linkNotasAtualizacao.largura,
+                altura: TamanhosDialogos.linkNotasAtualizacao.altura,
+                idLayout: TamanhosDialogos.linkNotasAtualizacao.id,
+              ),
             ),
-          ),
-          const SizedBox(height: 6),
-          Container(
-            constraints: const BoxConstraints(maxHeight: 260),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: esquema.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: _NotasDaVersao(notas: notas),
-          ),
+          ],
           if (!instalavel) ...[
             const SizedBox(height: 10),
             Text(
@@ -222,17 +236,37 @@ void abrirAtualizacao(App app) {
     acoes: (context) => [
       Botao.texto(
         'Pular esta versão',
-        aoClicar: () {
-          try {
-            ja<Object?>('atualizacao.configurar', {'pular': versao});
-          } catch (_) {}
-          atualizacaoDisponivel.value = null;
-          app.fecharEsta(d);
-          app.toast(
-            'A versão $versao não será mais oferecida. Você pode procurar de novo em '
-            'Configurações › Avançado › Atualizações.',
-          );
-        },
+        aoClicar: pulando
+            ? null
+            : () async {
+                if (pulando) return;
+                pulando = true;
+                d.atualizar();
+                try {
+                  await chamar<Object?>('atualizacao.configurar', {
+                    'pular': versao,
+                  });
+                } catch (e) {
+                  pulando = false;
+                  if (app.viva) {
+                    if (d.aberto) d.atualizar();
+                    app.toast(
+                      'Não foi possível pular esta versão. $e',
+                      erro: true,
+                    );
+                  }
+                  return;
+                }
+                if (atualizacaoDisponivel.value?['versao'] == info['versao']) {
+                  atualizacaoDisponivel.value = null;
+                }
+                if (!app.viva) return;
+                app.fecharEsta(d);
+                app.toast(
+                  'A versão $versao não será mais oferecida. Você pode procurar de novo em '
+                  'Configurações › Avançado › Atualizações.',
+                );
+              },
         idLayout: 'Atualizacao.botaoPular',
       ),
       Row(
@@ -258,15 +292,9 @@ void abrirAtualizacao(App app) {
             )
           else
             Botao(
-              'Abrir página de download',
+              'Ver versão no GitHub',
               icone: Icons.open_in_new,
-              aoClicar: () {
-                try {
-                  abrirEndereco('${info['pagina'] ?? ''}');
-                } catch (e) {
-                  app.toast('$e', erro: true);
-                }
-              },
+              aoClicar: pagina.isEmpty ? null : abrirPagina,
               idLayout: 'Atualizacao.botaoPaginaDownload',
             ),
         ],
@@ -415,34 +443,4 @@ void _confirmar(App app, String versao) {
     idLayout: 'Janela.atualizacao.confirmar',
   );
   app.mostrarDialogo(d);
-}
-
-class _NotasDaVersao extends StatefulWidget {
-  const _NotasDaVersao({required this.notas});
-  final String notas;
-  @override
-  State<_NotasDaVersao> createState() => _NotasDaVersaoState();
-}
-
-class _NotasDaVersaoState extends State<_NotasDaVersao> {
-  final _rolagem = ScrollController();
-  @override
-  void dispose() {
-    _rolagem.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => Scrollbar(
-    controller: _rolagem,
-    thumbVisibility: true,
-    child: SingleChildScrollView(
-      controller: _rolagem,
-      padding: const EdgeInsets.only(right: 12),
-      child: SelectableText(
-        widget.notas.isEmpty ? 'Melhorias e correções.' : widget.notas,
-        style: const TextStyle(fontSize: Letra.texto, height: 1.4),
-      ),
-    ),
-  );
 }

@@ -78,9 +78,186 @@ pub fn criar_tabelas(con: &Connection) -> Res<()> {
             PRIMARY KEY (usuario_id, prestador),
             FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS usuario_codigo (
+            usuario_id INTEGER PRIMARY KEY,
+            codigo TEXT NOT NULL UNIQUE
+        );
         ",
     )?;
     Ok(())
+}
+
+// ------------------------------------------------------------------------------- //
+// Código de autorização: 2 letras ou números, único por conta, escolhido pelo usuário.
+// Na autorização, quem autoriza digita o código seguido da senha ("AD" + "senha"); o
+// código identifica UMA conta e só ela tem a senha conferida. Maiúsculas e minúsculas
+// valem o mesmo no código; a senha continua diferenciando.
+// ------------------------------------------------------------------------------- //
+pub const CODIGO_TAM: usize = 2;
+const SUGESTOES_MAX: usize = 3;
+const ALFABETO_CODIGO: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+/// Código canônico: letras ASCII e algarismos, em maiúsculas, no máximo 2.
+pub fn normalizar_codigo(codigo: &str) -> String {
+    codigo
+        .trim()
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_uppercase())
+        .take(CODIGO_TAM)
+        .collect()
+}
+
+fn codigo_valido(codigo: &str) -> bool {
+    codigo.len() == CODIGO_TAM && codigo.bytes().all(|b| ALFABETO_CODIGO.contains(&b))
+}
+
+const CODIGO_INVALIDO: &str = "O código de autorização deve ter 2 letras ou números.";
+
+/// Até 3 códigos livres parecidos com `codigo`: primeiro o segundo caractere vizinho, depois o
+/// código invertido e, por fim, o primeiro caractere vizinho. Letras sugerem letras e
+/// algarismos sugerem algarismos antes de misturar os dois.
+pub fn sugerir_codigos(codigo: &str, ocupados: &std::collections::HashSet<String>) -> Vec<String> {
+    let alvo = normalizar_codigo(codigo);
+    if !codigo_valido(&alvo) {
+        return Vec::new();
+    }
+    let alvo = alvo.as_bytes();
+    let posicao = |c: u8| {
+        let i = ALFABETO_CODIGO.iter().position(|&x| x == c).unwrap_or(0) as i32;
+        (c.is_ascii_digit(), i)
+    };
+    let distancia = |a: u8, b: u8| {
+        let ((da, pa), (db, pb)) = (posicao(a), posicao(b));
+        (pa - pb).abs() + if da == db { 0 } else { 40 }
+    };
+    let mut candidatos: Vec<(i32, bool, u8, String)> = Vec::new();
+    for &a in ALFABETO_CODIGO {
+        for &b in ALFABETO_CODIGO {
+            let c = String::from_utf8(vec![a, b]).unwrap_or_default();
+            if (a, b) == (alvo[0], alvo[1]) || ocupados.contains(&c) {
+                continue;
+            }
+            let peso = if (a, b) == (alvo[1], alvo[0]) {
+                3
+            } else {
+                distancia(a, alvo[0]) * 4 + distancia(b, alvo[1]) * 2
+            };
+            // No empate, manter o primeiro caractere vem antes, e o caractere seguinte vem
+            // antes do anterior (AD → AE antes de AC).
+            let antes = u8::from(a < alvo[0] || (a == alvo[0] && b < alvo[1]));
+            candidatos.push((peso, a != alvo[0], antes, c));
+        }
+    }
+    candidatos.sort();
+    candidatos.into_iter().take(SUGESTOES_MAX).map(|(_, _, _, c)| c).collect()
+}
+
+fn codigos_em_uso(con: &Connection, exceto: Option<i64>) -> Res<std::collections::HashSet<String>> {
+    // Só contas que existem: uma versão anterior que excluiu a conta deixa o código órfão.
+    let mut st = con.prepare(
+        "SELECT c.codigo FROM usuario_codigo c JOIN usuarios u ON u.id = c.usuario_id \
+         WHERE c.usuario_id <> ?1",
+    )?;
+    let it = st.query_map([exceto.unwrap_or(0)], |r| r.get::<_, String>(0))?;
+    Ok(it.collect::<Result<_, _>>()?)
+}
+
+fn em_uso(codigo: &str, sugestoes: &[String]) -> Erro {
+    let mut msg = format!("O código {codigo} já está em uso.");
+    if !sugestoes.is_empty() {
+        msg.push_str(&format!(" Disponíveis: {}.", sugestoes.join(", ")));
+    }
+    Erro::valor(msg)
+}
+
+/// Resultado da conferência de um código digitado (cadastro ou troca).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ConferenciaCodigo {
+    pub codigo: String,
+    pub valido: bool,
+    pub disponivel: bool,
+    pub sugestoes: Vec<String>,
+}
+
+/// Confere se `codigo` pode ser usado. `usuario_id` = a conta que vai usá-lo (o código atual
+/// dela conta como disponível).
+pub fn conferir_codigo(codigo: &str, usuario_id: Option<i64>) -> Res<ConferenciaCodigo> {
+    let codigo = normalizar_codigo(codigo);
+    if !codigo_valido(&codigo) {
+        return Ok(ConferenciaCodigo { codigo, valido: false, disponivel: false, sugestoes: Vec::new() });
+    }
+    let ocupados = codigos_em_uso(&db()?, usuario_id)?;
+    let disponivel = !ocupados.contains(&codigo);
+    let sugestoes = if disponivel { Vec::new() } else { sugerir_codigos(&codigo, &ocupados) };
+    Ok(ConferenciaCodigo { codigo, valido: true, disponivel, sugestoes })
+}
+
+/// O código de autorização da conta (None = ainda não definido).
+pub fn codigo_de(usuario_id: i64) -> Res<Option<String>> {
+    Ok(db()?
+        .query_row(
+            "SELECT codigo FROM usuario_codigo WHERE usuario_id = ?1",
+            [usuario_id],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
+/// Grava o código na transação de quem chama. Código ocupado volta com até 3 sugestões.
+fn gravar_codigo(con: &Connection, usuario_id: i64, codigo: &str) -> Res<String> {
+    let codigo = normalizar_codigo(codigo);
+    if !codigo_valido(&codigo) {
+        return Err(Erro::valor(CODIGO_INVALIDO));
+    }
+    let ocupados = codigos_em_uso(con, Some(usuario_id))?;
+    if ocupados.contains(&codigo) {
+        return Err(em_uso(&codigo, &sugerir_codigos(&codigo, &ocupados)));
+    }
+    con.execute(
+        "DELETE FROM usuario_codigo WHERE codigo = ?1 AND usuario_id NOT IN (SELECT id FROM usuarios)",
+        [&codigo],
+    )?;
+    con.execute(
+        "INSERT INTO usuario_codigo (usuario_id, codigo) VALUES (?1, ?2) \
+         ON CONFLICT(usuario_id) DO UPDATE SET codigo = excluded.codigo",
+        params![usuario_id, codigo],
+    )?;
+    Ok(codigo)
+}
+
+/// Define (ou troca) o código de autorização da conta.
+pub fn definir_codigo(usuario_id: i64, codigo: &str) -> Res<String> {
+    let mut con = db()?;
+    let tx = con.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let gravado = gravar_codigo(&tx, usuario_id, codigo)?;
+    tx.commit()?;
+    Ok(gravado)
+}
+
+/// Autorização por "código + senha" num campo só: os 2 primeiros caracteres são o código (sem
+/// diferenciar maiúsculas), o restante é a senha. Só a conta do código tem a senha conferida.
+pub fn autenticar_por_codigo(credencial: &str) -> Res<Option<Usuario>> {
+    let mut caracteres = credencial.chars();
+    let codigo: String = caracteres.by_ref().take(CODIGO_TAM).collect::<String>().to_ascii_uppercase();
+    let senha: String = caracteres.collect();
+    if !codigo_valido(&codigo) || senha.is_empty() {
+        return Ok(None);
+    }
+    let linha: Option<(Usuario, Vec<u8>, Vec<u8>)> = {
+        let con = db()?;
+        con.query_row(
+            "SELECT u.id, u.login, u.nome, u.nivel, u.ativo, u.senha_salt, u.senha_hash \
+             FROM usuario_codigo c JOIN usuarios u ON u.id = c.usuario_id WHERE c.codigo = ?1",
+            [&codigo],
+            |r| Ok((usuario(r)?, r.get(5)?, r.get(6)?)),
+        )
+        .optional()?
+    };
+    Ok(match linha {
+        Some((u, sal, guardado)) if u.ativo && iguais(&hash(&senha, &sal), &guardado) => Some(u),
+        _ => None,
+    })
 }
 
 const COLUNAS: &str = "id, login, nome, nivel, ativo";
@@ -111,7 +288,7 @@ pub fn levar_master_para(con_novo: &mut Connection) -> Res<()> {
         criado_por: Option<String>,
         foto: Option<Vec<u8>>,
     }
-    let (m, ch) = {
+    let (m, ch, codigo) = {
         let atual = db()?;
         let m: Option<Master> = atual
             .query_row(
@@ -144,7 +321,17 @@ pub fn levar_master_para(con_novo: &mut Connection) -> Res<()> {
                 .optional()?,
             None => None,
         };
-        (m, ch)
+        let codigo: Option<String> = match &m {
+            Some(m) => atual
+                .query_row(
+                    "SELECT codigo FROM usuario_codigo WHERE usuario_id = ?1",
+                    [m.id],
+                    |r| r.get(0),
+                )
+                .optional()?,
+            None => None,
+        };
+        (m, ch, codigo)
     };
     let Some(m) = m else { return Ok(()) };
     criar_tabelas(con_novo)?;
@@ -160,6 +347,7 @@ pub fn levar_master_para(con_novo: &mut Connection) -> Res<()> {
         for (tabela, coluna) in [
             ("usuario_prestadores", "usuario_id"),
             ("chave_usuario", "usuario_id"),
+            ("usuario_codigo", "usuario_id"),
             ("usuarios", "id"),
         ] {
             tx.execute(&format!("DELETE FROM {tabela} WHERE {coluna} = ?1"), [id])?;
@@ -200,6 +388,15 @@ pub fn levar_master_para(con_novo: &mut Connection) -> Res<()> {
             "INSERT OR REPLACE INTO chave_usuario (usuario_id, slot, sal, n, kek, embrulho) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![novo_id, slot, sal, n, kek, embrulho],
+        )?;
+    }
+    if let Some(codigo) = codigo {
+        // O master leva o código dele; a conta do backup que usava o mesmo escolhe outro no
+        // próximo acesso.
+        tx.execute("DELETE FROM usuario_codigo WHERE codigo = ?1", [&codigo])?;
+        tx.execute(
+            "INSERT INTO usuario_codigo (usuario_id, codigo) VALUES (?1, ?2)",
+            params![novo_id, codigo],
         )?;
     }
     tx.commit()?;
@@ -501,6 +698,24 @@ pub fn criar(
     prestadores: &[String],
     criado_por: Option<&Usuario>,
 ) -> Res<Usuario> {
+    criar_com_codigo(login, nome, nivel, senha, prestadores, criado_por, None)
+}
+
+/// `criar` com o código de autorização gravado na mesma transação: código inválido ou já usado
+/// não deixa a conta nascer.
+pub fn criar_com_codigo(
+    login: &str,
+    nome: &str,
+    nivel: i64,
+    senha: &str,
+    prestadores: &[String],
+    criado_por: Option<&Usuario>,
+    codigo: Option<&str>,
+) -> Res<Usuario> {
+    let codigo = codigo.map(normalizar_codigo).filter(|c| !c.is_empty());
+    if codigo.as_deref().is_some_and(|c| !codigo_valido(c)) {
+        return Err(Erro::valor(CODIGO_INVALIDO));
+    }
     let login = normalizar_login(login);
     let nome = normalizar_nome(nome);
     let mut nivel = nivel;
@@ -590,6 +805,9 @@ pub fn criar(
                 params![id, p],
             )?;
         }
+        if let Some(c) = &codigo {
+            gravar_codigo(&tx, id, c)?;
+        }
         tx.commit()?;
         id
     };
@@ -620,6 +838,10 @@ pub fn listar() -> Res<Vec<Usuario>> {
 
 pub fn por_id(usuario_id: i64) -> Res<Usuario> {
     let con = db()?;
+    por_id_em(&con, usuario_id)
+}
+
+fn por_id_em(con: &Connection, usuario_id: i64) -> Res<Usuario> {
     con.query_row(
         &format!("SELECT {COLUNAS} FROM usuarios WHERE id = ?1"),
         [usuario_id],
@@ -727,6 +949,7 @@ pub fn excluir(usuario_id: i64, por: &Usuario) -> Res<()> {
             "DELETE FROM usuario_prestadores WHERE usuario_id = ?1",
             [alvo.id],
         )?;
+        tx.execute("DELETE FROM usuario_codigo WHERE usuario_id = ?1", [alvo.id])?;
         tx.execute("DELETE FROM usuarios WHERE id = ?1", [alvo.id])?;
         tx.commit()?;
     }
@@ -766,6 +989,19 @@ pub fn redefinir_senha(usuario_id: i64, nova_senha: &str, por: &Usuario) -> Res<
     let alvo = por_id(usuario_id)?;
     exigir_gerencia(&alvo, por)?;
     gravar_senha(usuario_id, nova_senha)
+}
+
+pub(crate) fn redefinir_codigo(usuario_id: i64, codigo: &str, por: &Usuario) -> Res<String> {
+    let mut con = db()?;
+    let tx = con.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let responsavel = por_id_em(&tx, por.id)?;
+    if !responsavel.ativo || responsavel.nivel != por.nivel || responsavel.login != por.login {
+        return Err(Erro::valor("A autorização mudou. Autorize a operação novamente."));
+    }
+    exigir_gerencia(&por_id_em(&tx, usuario_id)?, &responsavel)?;
+    let gravado = gravar_codigo(&tx, usuario_id, codigo)?;
+    tx.commit()?;
+    Ok(gravado)
 }
 
 pub fn trocar_propria_senha(usuario: &Usuario, senha_atual: &str, nova_senha: &str) -> Res<()> {
@@ -859,4 +1095,46 @@ pub fn redefinir_senha_master(nova_senha: &str, novo_login: &str, novo_nome: &st
     }
     gravar_senha(uid, nova_senha)?; // depois do login novo: a chave no dados.key usa o login
     por_id(uid)
+}
+
+#[cfg(test)]
+mod testes_codigo {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn ocupados(lista: &[&str]) -> HashSet<String> {
+        lista.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn normaliza_sem_diferenciar_maiusculas() {
+        assert_eq!(normalizar_codigo(" ad "), "AD");
+        assert_eq!(normalizar_codigo("a-1x"), "A1");
+        assert!(codigo_valido("Z9"));
+        assert!(!codigo_valido("A"));
+        assert!(!codigo_valido("Ç1"));
+    }
+
+    #[test]
+    fn sugere_vizinhos_e_invertido() {
+        assert_eq!(sugerir_codigos("ad", &ocupados(&["AD"])), ["AE", "AC", "DA"]);
+        assert_eq!(sugerir_codigos("12", &ocupados(&["12"])), ["13", "11", "21"]);
+        assert_eq!(sugerir_codigos("AD", &ocupados(&["AD", "AE", "DA"])), ["AC", "AF", "AB"]);
+        // Fim do alfabeto: sem vizinho seguinte, segue pelos anteriores.
+        assert_eq!(sugerir_codigos("ZZ", &ocupados(&["ZZ"])), ["ZY", "ZX", "YZ"]);
+        assert!(sugerir_codigos("A", &ocupados(&[])).len() == 0);
+    }
+
+    #[test]
+    fn nunca_sugere_mais_de_tres_nem_ocupados() {
+        let todos: Vec<String> = ALFABETO_CODIGO
+            .iter()
+            .flat_map(|&a| ALFABETO_CODIGO.iter().map(move |&b| String::from_utf8(vec![a, b]).unwrap()))
+            .collect();
+        let mut quase: HashSet<String> = todos.iter().cloned().collect();
+        quase.remove("Q7");
+        assert_eq!(sugerir_codigos("AD", &quase), ["Q7"]);
+        let cheio: HashSet<String> = todos.into_iter().collect();
+        assert!(sugerir_codigos("AD", &cheio).is_empty());
+    }
 }

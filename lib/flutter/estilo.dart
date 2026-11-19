@@ -1093,6 +1093,11 @@ abstract final class TamanhosCofre {
 
 /// Configurações.
 abstract final class TamanhosConfiguracoes {
+  static const marcarInicializacaoAutomatica = Tamanho(
+    largura: null,
+    altura: null,
+    id: 'TamanhosConfiguracoes.marcarInicializacaoAutomatica',
+  );
 
   /// Exportar logs para o suporte (Avançado › Logs)
   static const botaoExportarLogs = Tamanho(
@@ -3125,7 +3130,21 @@ abstract final class TamanhosPeriodo {
 }
 
 /// Diálogos gerais.
+abstract final class TamanhosAjuda {
+  static const botaoCopiarEmail = Tamanho(
+    largura: null,
+    altura: null,
+    id: 'Ajuda.botaoCopiarEmail',
+  );
+}
+
 abstract final class TamanhosDialogos {
+  static const linkNotasAtualizacao = Tamanho(
+    largura: null,
+    altura: null,
+    id: 'TamanhosDialogos.linkNotasAtualizacao',
+  );
+
   /// Senha de nível $n
   static const rotuloSenhaDeNivelN = Tamanho(
     largura: null,
@@ -3138,6 +3157,13 @@ abstract final class TamanhosDialogos {
     largura: 260,
     altura: null,
     id: 'TamanhosDialogos.campoSenha',
+  );
+
+  /// Instrução abaixo do campo de autorização.
+  static const rotuloDicaCodigo = Tamanho(
+    largura: null,
+    altura: null,
+    id: 'TamanhosDialogos.rotuloDicaCodigo',
   );
 
   /// erro
@@ -3265,6 +3291,13 @@ abstract final class TamanhosNavegacao {
 
 /// Menu do usuário.
 abstract final class TamanhosMenuUsuario {
+  /// Código de autorização (janela de definir/trocar)
+  static const campoCodigo = Tamanho(
+    largura: 200,
+    altura: null,
+    id: 'TamanhosMenuUsuario.campoCodigo',
+  );
+
   /// texto ?? 'Nível $nivel'
   static const rotuloTextoNivelNivel = Tamanho(
     largura: null,
@@ -3621,6 +3654,13 @@ abstract final class TamanhosUsuarios {
     id: 'TamanhosUsuarios.campoConfirmar',
   );
 
+  /// Código de autorização
+  static const campoCodigo = Tamanho(
+    largura: 180,
+    altura: null,
+    id: 'TamanhosUsuarios.campoCodigo',
+  );
+
   /// Prestadores que este usuário pode operar:
   static const rotuloPrestadoresQueEsteUsuarioPodeOperar = Tamanho(
     largura: null,
@@ -3745,6 +3785,12 @@ abstract final class TamanhosUsuarios {
   );
 
   /// Redefinir senha
+  static const botaoRedefinirCodigo = Tamanho(
+    largura: null,
+    altura: null,
+    id: 'TamanhosUsuarios.botaoRedefinirCodigo',
+  );
+
   static const botaoRedefinirSenha = Tamanho(
     largura: null,
     altura: null,

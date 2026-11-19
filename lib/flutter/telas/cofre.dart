@@ -14,6 +14,7 @@ import '../editor_layout.dart';
 
 import '../app/app.dart';
 import '../app/sistema.dart';
+import '../app/xml_ilegivel.dart';
 import '../kit/arquivos.dart';
 import '../kit/campo.dart';
 import '../kit/flet.dart';
@@ -152,8 +153,9 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
   Timer? _autoTimer;
   bool _autoCuidou = false;
   bool _autoRodando = false;
+  bool _autoEmCurso = false;
+  double _ultimaAutomatica = 0;
   String _fichaAuto = '';
-  final Set<String> _autoAvisados = {};
 
   @override
   void initState() {
@@ -169,7 +171,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
     app.cofreAtualizarSituacao = _atualizarSituacao;
     app.cofreCuidar = _cuidar;
     // Cofre: manutenção do banco de notas e, se ligada, a sincronização automática.
-    if (!app.semPrestador) _iniciarAutomatica();
+    _iniciarAutomatica();
   }
 
   void _redesenhar() => redesenhar();
@@ -315,6 +317,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
         grupos = {for (final par in pares) par[0] as String: par[1] as String};
         Future<Map> listar() => chamar<Map>('cofre.listar', {
           'por_competencia': porCompetencia,
+          if (_ddBasePeriodo.valor == 'movimento') 'por_movimento': true,
           'dono': prest,
           'filtro': {
             'grupos': [
@@ -598,7 +601,9 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
       }
       await _cuidar(); // confere o banco de notas e refaz a cópia se estiver velha
       _sincUi(false);
-      if (((tot?['novas'] as num?) ?? 0) + ((tot?['eventos'] as num?) ?? 0) > 0) {
+      // A rodada também pode ter concluído uma substituição sem trazer documentos do ADN.
+      if ((tot?['feitos'] as List?)?.isNotEmpty == true) {
+        app.refazerAvisoFila?.call();
         app.notasMudaram();
       }
       if (app.prestador == prest) carregarPagina();
@@ -638,14 +643,6 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
   }
 
   void _iniciarAutomatica() {
-    app.autoCfg = Map<String, dynamic>.from(ja<Map>('cofre.config'));
-    app.autoEstado
-      ..['texto'] = ''
-      ..['falhas'] = 0
-      ..['tentar_em'] = 0.0
-      ..['rodando'] = false;
-    // Quase sempre dormindo: acorda de tempos em tempos para ver se é hora. Não tem anel
-    // nem tela própria — só avisa quando chega nota nova.
     _autoTimer = Timer(_esperaInicial, () {
       _autoTique();
       _autoTimer = Timer.periodic(_passo, (_) => _autoTique());
@@ -657,50 +654,55 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
     final tentar = (app.autoEstado['tentar_em'] as num).toDouble();
     if (tentar > 0)
       return tentar; // sem internet na última: nova tentativa mais cedo
-    return (ja<num>('cofre.ultima_automatica')).toDouble() +
-        (app.autoCfg['intervalo'] as num) * 60;
+    return _ultimaAutomatica + (app.autoCfg['intervalo'] as num? ?? 60) * 60;
   }
 
   Future<void> _autoTique() async {
-    if (!app.temPermissao('cofre.sincronizar', somenteLogado: true)) return;
-    if (!app.viva || _autoRodando) return;
+    if (!mounted || !app.viva || _autoEmCurso) return;
+    _autoEmCurso = true;
     try {
+      if (app.autoCfg.isEmpty) {
+        final cfg = await chamar<Map>('cofre.config');
+        if (!mounted || !app.viva) return;
+        if (app.autoCfg.isEmpty) app.autoCfg = Map<String, dynamic>.from(cfg);
+      }
       if (!_autoCuidou) {
         _autoCuidou = true;
         // uma conferência por sessão, mesmo sem automática
-        final sit = jaMapa('cofre.situacao_protecao');
-        if (ja<bool>('cofre.existe') || ((sit['copia_mb'] as num?) ?? 0) > 0)
+        final sit = await chamar<Map>('cofre.situacao_protecao');
+        if (await chamar<bool>('cofre.existe') || ((sit['copia_mb'] as num?) ?? 0) > 0) {
+          if (!mounted || !app.viva) return;
           await _cuidar();
+        }
       }
       final cfg = app.autoCfg;
       final agoraS = DateTime.now().millisecondsSinceEpoch / 1000;
       if (cfg['automatica'] != true || _sincAtiva || agoraS < _autoProxima())
         return;
       final est = app.autoEstado;
-      final pares = app.paresCofre();
-      if (pares.isEmpty) return;
       _autoRodando = true;
       est['rodando'] = true;
       _fichaAuto = 'cofre-auto-${DateTime.now().microsecondsSinceEpoch}';
       Map<String, dynamic> tot;
       try {
         tot = Map<String, dynamic>.from(
-          await chamar<Map>('cofre.sincronizar_varios', {
-            'pares': pares,
+          await chamar<Map>('cofre.sincronizar_automaticamente', {
             'ficha': _fichaAuto,
           }),
         );
       } finally {
         _autoRodando = false;
+        _fichaAuto = '';
         est['rodando'] = false;
       }
-      if (!app.viva) return;
+      if (!mounted || !app.viva) return;
+      _ultimaAutomatica = (tot['ultima'] as num?)?.toDouble() ?? _ultimaAutomatica;
       final n = DateTime.now();
       String z(int x) => x.toString().padLeft(2, '0');
       final agora =
           '${z(n.day)}/${z(n.month)}/${n.year} ${z(n.hour)}:${z(n.minute)}';
-      final semRede = (tot['sem_rede'] as String?) ?? '';
-      if (semRede.isNotEmpty) {
+      if (tot['rodou'] != true) return;
+      if (tot['sem_rede'] == true) {
         // Internet/ADN fora: nada foi gravado pela metade. Tenta de novo em 5, 10, 20 e 40
         // min (nunca além do intervalo escolhido) e depois volta ao ritmo normal.
         est['falhas'] = (est['falhas'] as int) + 1;
@@ -713,45 +715,22 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
             DateTime.now().millisecondsSinceEpoch / 1000 + espera * 60;
         est['texto'] =
             '$agora: sem conexão com o ADN. Nova tentativa em ${intervaloTexto(espera)}.';
-        registrar('Cofre (automática): $semRede', nivel: 'warning');
+        registrar('Cofre (automática): falha de conexão com o ADN.', nivel: 'warning');
         return;
       }
       est['falhas'] = 0;
       est['tentar_em'] = 0.0;
       if (tot['cancelado'] == true) return;
-      ja<Object?>('cofre.marcar_automatica');
-      final erros = (tot['erros'] as List?) ?? const [];
-      final comErro = <String>{};
-      for (final e in erros) {
-        final (prest, amb, msg) = (
-          (e as List)[0] as String,
-          e[1] as String,
-          e[2] as String,
-        );
-        comErro.add(prest);
-        // uma vez por sessão, só no registro
-        if (_autoAvisados.add('$prest|$msg')) {
-          registrar(
-            'Cofre (automática): ${formatarDocumento(prest)} [${ambRotulos[amb] ?? amb}]: $msg',
-            nivel: 'warning',
-          );
-        }
-      }
-      est['texto'] =
-          '$agora: ${resumoDaSincronizacao(tot)}'
-          '${erros.isNotEmpty ? ' ${comErro.length} prestador(es) não pôde(puderam) ser consultado(s) — veja os Registros.' : ''}';
-      if (((tot['novas'] as num) + (tot['eventos'] as num)) > 0) {
-        app.toast(
-          'Cofre (sincronização automática): ${resumoDaSincronizacao(tot)}',
-        );
-        app.notasMudaram();
-        if (app.navAtual == 4) carregarPagina();
-        await _cuidar();
-      }
+      est['texto'] = '$agora: rodada automática concluída.';
+      app.refazerAvisoFila?.call();
+      app.notasMudaram();
+      if (app.navAtual == 4) carregarPagina();
       _atualizarSituacao();
     } catch (e) {
       // a rodada ruim não pode parar o ciclo
       registrar('Falha na rodada automática do Cofre: $e', nivel: 'error');
+    } finally {
+      _autoEmCurso = false;
     }
   }
 
@@ -775,6 +754,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
         });
       } catch (e) {
         registrar('Falha ao gerar a DANFSe pelo Cofre: $e', nivel: 'error');
+        if (_oferecerRebusca(e, n, () => _abrirDanfse(n))) return;
         app.toast(
           'Não foi possível gerar a DANFSe da ${_rotulo(n)}: $e',
           erro: true,
@@ -800,13 +780,33 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
     }
     if (destino == null || destino.isEmpty) return;
     if (!destino.toLowerCase().endsWith('.xml')) destino += '.xml';
-    try {
-      final b64 = ja<String>('cofre.xml_da_nota', {'nota_id': n['id']});
-      File(destino).writeAsBytesSync(base64Decode(b64));
-      app.toast('XML da ${_rotulo(n)} salvo em: $destino');
-    } catch (e) {
-      app.toast('Falha ao salvar o XML da ${_rotulo(n)}: $e', erro: true);
+    final dest = destino;
+    void gravar() {
+      try {
+        final b64 = ja<String>('cofre.xml_da_nota', {'nota_id': n['id']});
+        File(dest).writeAsBytesSync(base64Decode(b64));
+        app.toast('XML da ${_rotulo(n)} salvo em: $dest');
+      } catch (e) {
+        if (_oferecerRebusca(e, n, gravar)) return;
+        app.toast('Falha ao salvar o XML da ${_rotulo(n)}: $e', erro: true);
+      }
     }
+
+    gravar();
+  }
+
+  /// XML guardado que não abre: oferece buscar de novo na SEFIN e, se der certo, repete a ação.
+  bool _oferecerRebusca(Object e, Map<String, dynamic> n, VoidCallback repetir) {
+    final id = notaComXmlIlegivel(e);
+    if (id == null || !app.viva) return false;
+    oferecerRebusca(
+      app,
+      dono: app.prestador,
+      notaId: id,
+      rotulo: _rotulo(n),
+      aoRecuperar: repetir,
+    );
+    return true;
   }
 
   Future<void> _salvarDanfse(Map<String, dynamic> n) async {
@@ -826,7 +826,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
     if (!destino.toLowerCase().endsWith('.pdf')) destino += '.pdf';
     final dest = destino;
     final prest = app.prestador;
-    app.emSegundoPlano(() async {
+    void gerar() => app.emSegundoPlano(() async {
       try {
         final pdf = await chamar<String>('cofre.gerar_danfse', {
           'dono': prest,
@@ -836,9 +836,12 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
         app.toast('DANFSe da ${_rotulo(n)} salva em: $dest');
       } catch (e) {
         registrar('Falha ao salvar a DANFSe pelo Cofre: $e', nivel: 'error');
+        if (_oferecerRebusca(e, n, gerar)) return;
         app.toast('Falha ao salvar a DANFSe da ${_rotulo(n)}: $e', erro: true);
       }
     });
+
+    gerar();
   }
 
   // ---- exportar dados do Cofre ----------------------------------------------------------------------- //
@@ -857,14 +860,13 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
     final f0 = filtro();
     final termo = f0.termo;
     late final Dialogo d;
-    late final Suspensa ddPer, ddTipo, ddAmb, ddSit;
+    late final Suspensa ddPer, ddTipo, ddAmb, ddSit, ddBase;
     var de = _de;
     var ate = _ate;
     var anterior = _periodoAnt;
     var soBusca = true;
     var (xml, danfse, eventos, relatorio) = (true, false, false, false);
     var (porMes, porTipo) = (false, false);
-    var porCompetencia = _ddBasePeriodo.valor == 'competencia';
     final formatos = {for (final f in formatosExportacao.keys) f: f == 'xlsx'};
 
     String intervalo() => anterior == 'custom' ? textoDoIntervalo(de, ate) : '';
@@ -932,7 +934,8 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
       final tipo = ddTipo.valor;
       final sit = ddSit.valor;
       final filtro = <String, Object?>{
-        'por_competencia': porCompetencia,
+        'por_competencia': ddBase.valor == 'competencia',
+        if (ddBase.valor == 'movimento') 'por_movimento': true,
         'papel': (tipo == null || tipo.isEmpty || tipo == todos) ? '' : tipo,
         'ambiente': ambRotulos.containsKey(ddAmb.valor) ? ddAmb.valor : '',
         'ini': dataIso(ini),
@@ -1015,10 +1018,11 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
             quebra: true,
             idLayout: 'Grupo.cofre.lin.2',
           ),
-          caixa(
-            'Filtrar período pela competência',
-            porCompetencia,
-            (v) => porCompetencia = v,
+          ListaSuspensa(
+            estado: ddBase,
+            rotulo: 'Data',
+            largura: larguraFiltroData,
+            idLayout: 'Cofre.exportacao.baseData',
           ),
           if (termo.isNotEmpty)
             caixa(
@@ -1145,6 +1149,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
       ],
       idLayout: 'Janela.cofre.Dialogo.1',
     );
+    ddBase = d.suspensa(valor: _ddBasePeriodo.valor, opcoes: opcoesBasePeriodo);
     ddPer = d.suspensa(
       valor: anterior,
       opcoes: _opcoesPeriodoCofre(intervalo()),
@@ -1419,9 +1424,11 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
           DataCell(
             _celula(
               4,
-              _ddBasePeriodo.valor == 'competencia'
-                  ? dataIsoParaBr(s('dCompet'))
-                  : dataHora(s('dhProc')),
+              switch (_ddBasePeriodo.valor) {
+                'competencia' => dataIsoParaBr(s('dCompet')),
+                'movimento' => dataHora(s('movimento')),
+                _ => dataHora(s('dhProc')),
+              },
               cor: cor,
             ),
           ),
@@ -1572,9 +1579,11 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
         coluna('Emitente / Tomador'),
         coluna('Documento'),
         coluna(
-          _ddBasePeriodo.valor == 'competencia'
-              ? 'Competência'
-              : 'Processada em',
+          switch (_ddBasePeriodo.valor) {
+            'competencia' => 'Competência',
+            'movimento' => 'Movimento',
+            _ => 'Processada em',
+          },
         ),
         coluna('Ambiente'),
         coluna('Status'),
@@ -1676,9 +1685,9 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
               idLayout: 'TamanhosCofre.rotuloTextoSinc',
             ),
           ),
-          Botao.contorno(
-            'Exportar dados',
-            icone: Icons.download,
+          BotaoIcone(
+            Icons.download,
+            dica: 'Exportar dados',
             aoClicar: _abrirExportar,
             largura: TamanhosCofre.botaoExportarDados.largura,
             altura: TamanhosCofre.botaoExportarDados.altura,

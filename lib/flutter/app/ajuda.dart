@@ -9,7 +9,10 @@ import 'logs.dart';
 import 'sistema.dart';
 
 void abrirAjuda(App app) {
-  if(!app.temPermissao('ajuda')) { app.exigirPermissao('ajuda',()=>abrirAjuda(app));return; }
+  if (!app.temPermissao('ajuda')) {
+    app.exigirPermissao('ajuda', () => abrirAjuda(app));
+    return;
+  }
   Map<String, dynamic> info;
   try {
     info = jaMapa('ajuda.info');
@@ -17,24 +20,35 @@ void abrirAjuda(App app) {
     app.toast('Não foi possível abrir a ajuda: $e', erro: true);
     return;
   }
-  app.mostrarDialogo(
-    Dialogo(
-      largura: 620,
-      titulo: (context) => const Text('Ajuda'),
-      conteudo: (context) => _conteudo(context, app, info),
-      acoes: (context) => [
-        Botao(
-          'Fechar',
-          aoClicar: app.fecharDialogo,
-          idLayout: 'Ajuda.botaoFechar',
-        ),
-      ],
-      idLayout: 'Janela.ajuda',
-    ),
+  var copiado = false;
+  late final Dialogo d;
+  d = Dialogo(
+    largura: 620,
+    titulo: (context) => const Text('Ajuda'),
+    conteudo: (context) => _conteudo(context, app, info, copiado, () {
+      if (!d.aberto) return;
+      copiado = true;
+      d.atualizar();
+    }),
+    acoes: (context) => [
+      Botao(
+        'Fechar',
+        aoClicar: app.fecharDialogo,
+        idLayout: 'Ajuda.botaoFechar',
+      ),
+    ],
+    idLayout: 'Janela.ajuda',
   );
+  app.mostrarDialogo(d);
 }
 
-Widget _conteudo(BuildContext context, App app, Map<String, dynamic> info) {
+Widget _conteudo(
+  BuildContext context,
+  App app,
+  Map<String, dynamic> info,
+  bool copiado,
+  VoidCallback aoCopiar,
+) {
   final esquema = Theme.of(context).colorScheme;
   final manual = '${info['manual'] ?? ''}';
   final temManual = info['manual_existe'] == true;
@@ -146,13 +160,39 @@ Widget _conteudo(BuildContext context, App app, Map<String, dynamic> info) {
             'tela e o arquivo de "Exportar logs para o suporte" (CPF, CNPJ e e-mail saem '
             'mascarados). Nunca envie a senha nem o arquivo do certificado.',
         filhos: [
-          SelectableText(
-            email,
-            style: TextStyle(
-              fontSize: Letra.texto + 1,
-              fontWeight: FontWeight.w700,
-              color: esquema.primary,
-            ),
+          lin(
+            [
+              Flexible(
+                child: SelectableText(
+                  email,
+                  style: TextStyle(
+                    fontSize: Letra.texto + 1,
+                    fontWeight: FontWeight.w700,
+                    color: esquema.primary,
+                  ),
+                ),
+              ),
+              BotaoIcone(
+                copiado ? Icons.check : Icons.content_copy,
+                tamanho: 16,
+                dica: copiado ? 'E-mail copiado' : 'Copiar e-mail',
+                aoClicar: () => app.exigirPermissao(
+                  'ajuda.contato',
+                  () => copiar(
+                    app,
+                    email,
+                    aviso: 'E-mail copiado.',
+                    aoCopiar: aoCopiar,
+                  ),
+                ),
+                largura: TamanhosAjuda.botaoCopiarEmail.largura,
+                altura: TamanhosAjuda.botaoCopiarEmail.altura,
+                idLayout: TamanhosAjuda.botaoCopiarEmail.id,
+              ),
+            ],
+            justa: true,
+            espaco: 4,
+            idLayout: 'Grupo.ajuda.email',
           ),
           const SizedBox(height: 10),
           Wrap(
@@ -167,15 +207,6 @@ Widget _conteudo(BuildContext context, App app, Map<String, dynamic> info) {
                   () => abrirUrl(app, 'mailto:$email?subject=$assunto'),
                 ),
                 idLayout: 'Ajuda.botaoEscreverEmail',
-              ),
-              Botao.contorno(
-                'Copiar',
-                icone: Icons.copy,
-                aoClicar: () => app.exigirPermissao(
-                  'ajuda.contato',
-                  () => copiar(app, email, aviso: 'E-mail copiado.'),
-                ),
-                idLayout: 'Ajuda.botaoCopiarEmail',
               ),
               Botao.contorno(
                 'Exportar logs para o suporte',
