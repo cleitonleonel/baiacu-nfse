@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="../extras/docs/imagens/capa.svg" alt="Baiacu NFS-e: nota fiscal de serviço em poucos cliques" width="100%">
+  <img src="docs/imagens/capa.svg" alt="Baiacu NFS-e: nota fiscal de serviço em poucos cliques" width="100%">
 </p>
 
 <p align="center">
   <a href="https://github.com/williamlala/baiacu-nfse/releases/latest"><img src="https://img.shields.io/badge/%E2%AC%87%20Baixar%20para%20Windows-4F46E5?style=for-the-badge" alt="Baixar para Windows"></a>
   &nbsp;
-  <a href="../extras/docs/Manual-Baiacu-NFS-e.pdf"><img src="https://img.shields.io/badge/Manual%20do%20usu%C3%A1rio%20(PDF)-F97316?style=for-the-badge" alt="Manual do usuário em PDF"></a>
+  <a href="docs/Manual-Baiacu-NFS-e.pdf"><img src="https://img.shields.io/badge/Manual%20do%20usu%C3%A1rio%20(PDF)-F97316?style=for-the-badge" alt="Manual do usuário em PDF"></a>
 </p>
 
 <p align="center">
-  <img src="../extras/docs/imagens/baiacu-nfse-demo-completo.gif" alt="Demonstração do Baiacu NFS-e: entrada, emissão, dashboard, cofre de notas, PDF e e-mail" width="100%">
+  <img src="docs/imagens/baiacu-nfse-demo-completo.gif" alt="Demonstração do Baiacu NFS-e: entrada, emissão, dashboard, cofre de notas, PDF e e-mail" width="100%">
 </p>
 
 <p align="center">
@@ -32,7 +32,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 ## 🚀 Como funciona
 
 <p align="center">
-  <img src="../extras/docs/imagens/como-funciona.svg" alt="1. Cadastre uma vez. 2. Emita em segundos. 3. O cliente recebe na hora." width="100%">
+  <img src="docs/imagens/como-funciona.svg" alt="1. Cadastre uma vez. 2. Emita em segundos. 3. O cliente recebe na hora." width="100%">
 </p>
 
 ---
@@ -42,7 +42,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 > As novas capturas usam dados fictícios e mostram a revisão local sobre a versão 1.0.0.5. O botão de download abre a distribuição publicada no GitHub.
 
 <p align="center">
-  <img src="../extras/docs/imagens/recursos.svg" alt="Recursos do Baiacu NFS-e" width="100%">
+  <img src="docs/imagens/recursos.svg" alt="Recursos do Baiacu NFS-e" width="100%">
 </p>
 
 ### 📈 Dashboard de análise
@@ -52,7 +52,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 - Passe o mouse para consultar um ponto e use a roda ou as lupas para ampliar. Os valores começam ocultos. O olho ao lado de **Visão financeira** revela ou oculta os números.
 - Os indicadores usam as NFS-e ativas de produção do Cofre para o prestador selecionado. Recebimentos efetivos, despesas e lucro dependem de registros próprios.
 
-![Dashboard com comparativo anual, tributos retidos e participação de clientes fictícios](../extras/docs/imagens/dashboard-financeiro.png)
+![Dashboard com comparativo anual, tributos retidos e participação de clientes fictícios](docs/imagens/dashboard-financeiro.png)
 
 ### 🧾 Emitir notas sem dor de cabeça
 - **Escolha o cliente e o serviço.** Descrição, valor e tributos já vêm do cadastro; você só ajusta o que mudou.
@@ -64,7 +64,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 
 - **Escolha a data de competência** no calendário. A data de hoje vem preenchida.
 
-![Tela Emitir com cliente e serviço fictícios selecionados](../extras/docs/imagens/emitir-nfse.png)
+![Tela Emitir com cliente e serviço fictícios selecionados](docs/imagens/emitir-nfse.png)
 
 ### 📦 Emitir em lote
 
@@ -73,12 +73,12 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 - Exporte o histórico em PDF, Excel ou CSV, com opção de incluir XMLs e DANFSe disponíveis no Cofre.
 - Use o ícone **Importar/exportar lote** para transferir os modelos em JSON.
 
-![Emissão em lote simulada, com notas emitidas, a nota em processamento e a fila de espera](../extras/docs/imagens/emissao-em-lote.gif)
+![Emissão em lote simulada, com notas emitidas, a nota em processamento e a fila de espera](docs/imagens/emissao-em-lote.gif)
 
 <details>
 <summary><b>Ver o lote após a conclusão</b></summary>
 
-![Registro fictício das notas após a conclusão do lote](../extras/docs/imagens/lote-concluido.png)
+![Registro fictício das notas após a conclusão do lote](docs/imagens/lote-concluido.png)
 
 </details>
 
@@ -89,7 +89,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 - **Importe e exporte clientes por planilha** (Excel, OpenDocument ou CSV). Baixe o modelo, preencha e veja uma prévia com os erros de cada linha antes de gravar. O CPF/CNPJ evita duplicados, e o município pode vir pelo código IBGE ou pela cidade e UF.
 - Já aceita o **novo CNPJ com letras e números**.
 
-![Aba Serviço e Tributação no cadastro de um cliente fictício](../extras/docs/imagens/cadastro-servico.png)
+![Aba Serviço e Tributação no cadastro de um cliente fictício](docs/imagens/cadastro-servico.png)
 
 ### 🏢 Uma empresa ou várias
 - Ideal para **contadores e escritórios**: cadastre vários prestadores, cada um com o próprio certificado digital, numeração e e-mail.
@@ -101,7 +101,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 - Gere o **PDF da nota (DANFSe)** quando quiser e baixe o **XML** a qualquer momento.
 - Exporte para **Excel** ou para um **relatório em PDF**, pronto para mandar ao contador.
 
-![Tela Consultar com filtro de período, notas fictícias e ações para XML e DANFSe](../extras/docs/imagens/consultar-nfse.png)
+![Tela Consultar com filtro de período, notas fictícias e ações para XML e DANFSe](docs/imagens/consultar-nfse.png)
 
 ### ✉️ Envio por e-mail
 - A nota vai para o cliente **com o PDF e o XML anexados**, saindo do **seu próprio e-mail**.
@@ -145,7 +145,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 5. Faça uma nota no **ambiente de testes**, que não tem valor fiscal, para ver como tudo funciona.
 6. Tudo certo? Mude para **produção** e comece a emitir. 🎉
 
-Ficou alguma dúvida? O [**manual do usuário**](../extras/docs/Manual-Baiacu-NFS-e.pdf) explica cada tela, passo a passo.
+Ficou alguma dúvida? O [**manual do usuário**](docs/Manual-Baiacu-NFS-e.pdf) explica cada tela, passo a passo.
 
 ---
 
@@ -233,11 +233,11 @@ O Baiacu NFS-e é feito com carinho e distribuído de graça, sem anúncios e se
 
 <table>
   <tr><th></th><th align="left">Moeda</th><th align="left">Rede</th><th align="left">Endereço</th></tr>
-  <tr><td><img src="../extras/docs/imagens/cripto/btc.svg" width="28" alt="Bitcoin"></td><td><b>Bitcoin</b> (BTC)</td><td>Bitcoin</td><td><code>bc1qs4r3fpdmahvcm6pxd2r7ctn077ndxzqgn8ntvd</code></td></tr>
-  <tr><td><img src="../extras/docs/imagens/cripto/trx.svg" width="28" alt="Tron"></td><td><b>Tron</b> (TRX)</td><td>Tron</td><td><code>TV1YHohhftEayTmh1L63t5kCUqXgWt58K4</code></td></tr>
-  <tr><td><img src="../extras/docs/imagens/cripto/eth.svg" width="28" alt="Ethereum"></td><td><b>Ethereum</b> (ETH)</td><td>Ethereum</td><td><code>0xaB91d332f687D03EA45537A8c0fB0BcfedDf0fB1</code></td></tr>
-  <tr><td><img src="../extras/docs/imagens/cripto/sol.svg" width="28" alt="Solana"></td><td><b>Solana</b> (SOL)</td><td>Solana</td><td><code>CudVniUfVT5xtihXrDAa7wSr8m9wj416aeLTzD4MweKG</code></td></tr>
-  <tr><td><img src="../extras/docs/imagens/cripto/bnb.svg" width="28" alt="BNB"></td><td><b>BNB</b></td><td>BNB Smart Chain (BEP-20)</td><td><code>0xaB91d332f687D03EA45537A8c0fB0BcfedDf0fB1</code></td></tr>
+  <tr><td><img src="docs/imagens/cripto/btc.svg" width="28" alt="Bitcoin"></td><td><b>Bitcoin</b> (BTC)</td><td>Bitcoin</td><td><code>bc1qs4r3fpdmahvcm6pxd2r7ctn077ndxzqgn8ntvd</code></td></tr>
+  <tr><td><img src="docs/imagens/cripto/trx.svg" width="28" alt="Tron"></td><td><b>Tron</b> (TRX)</td><td>Tron</td><td><code>TV1YHohhftEayTmh1L63t5kCUqXgWt58K4</code></td></tr>
+  <tr><td><img src="docs/imagens/cripto/eth.svg" width="28" alt="Ethereum"></td><td><b>Ethereum</b> (ETH)</td><td>Ethereum</td><td><code>0xaB91d332f687D03EA45537A8c0fB0BcfedDf0fB1</code></td></tr>
+  <tr><td><img src="docs/imagens/cripto/sol.svg" width="28" alt="Solana"></td><td><b>Solana</b> (SOL)</td><td>Solana</td><td><code>CudVniUfVT5xtihXrDAa7wSr8m9wj416aeLTzD4MweKG</code></td></tr>
+  <tr><td><img src="docs/imagens/cripto/bnb.svg" width="28" alt="BNB"></td><td><b>BNB</b></td><td>BNB Smart Chain (BEP-20)</td><td><code>0xaB91d332f687D03EA45537A8c0fB0BcfedDf0fB1</code></td></tr>
 </table>
 
 > ⚠️ Envie cada moeda **somente pela rede indicada**. Uma rede diferente pode fazer a doação se perder.
