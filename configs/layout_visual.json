@@ -341,6 +341,12 @@
     "Lotes.titulo": {
       "tamanhoFonte": 18.0
     },
+    "Dashboard.titulo": {
+      "tamanhoFonte": 18.0
+    },
+    "TamanhosConfiguracoes.rotuloConfiguracoes": {
+      "tamanhoFonte": 18.0
+    },
     "HistoricoLotes.titulo": {
       "tamanhoFonte": 18.0
     },

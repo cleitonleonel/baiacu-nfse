@@ -299,6 +299,12 @@ pub fn executar(metodo: &str, a: &Value) -> Option<Res<Value>> {
                 texto(a, "tomador")?,
             )?)
         })(),
+        "cadastro.formularios_servicos" => (|| {
+            js(cadastro::formularios_servicos(
+                texto(a, "prestador")?,
+                texto(a, "tomador")?,
+            )?)
+        })(),
         "cadastro.get_servico" => (|| {
             js(cadastro::get_servico(
                 texto(a, "prestador")?,

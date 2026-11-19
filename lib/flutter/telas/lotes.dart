@@ -1548,9 +1548,12 @@ class _TelaLotesState extends State<TelaLotes> {
       largura: 440,
       conteudo: (_) =>
           const Tx('Importe um lote do Baiacu ou exporte o lote selecionado.'),
+      acaoEsquerda: (_) => Botao.texto(
+        'Cancelar',
+        aoClicar: () => app.fecharEsta(d),
+        idLayout: 'Lotes.botaoCancelar7',
+      ),
       acoes: (_) => [
-        Botao.texto('Cancelar', aoClicar: () => app.fecharEsta(d), idLayout: 'Lotes.botaoCancelar7'),
-        const Spacer(),
         Botao.contorno(
           'Importar',
           aoClicar: () {
@@ -2459,9 +2462,11 @@ class _TelaLotesState extends State<TelaLotes> {
                 ),
                 lin(
                   [
-                    Botao.contorno(
-                      'Importar / exportar lote',
-                      icone: Icons.import_export,
+                    BotaoIcone(
+                      Icons.import_export,
+                      dica: 'Importar/exportar lote',
+                      largura: TamanhosClientes.botaoImportarExportar.largura,
+                      altura: TamanhosClientes.botaoImportarExportar.altura,
                       aoClicar: importarExportar,
                       desabilitado: ocupado || editando,
                       idLayout: 'Lotes.importarExportar',

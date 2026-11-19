@@ -25,7 +25,7 @@ use crate::erro::{Erro, Res};
 use crate::rede::{Sessao, Tempo};
 
 /// Versão deste programa. `compilar_exe.py` confere que é a mesma do `pubspec.yaml`.
-pub const VERSAO: &str = "1.0.0.5";
+pub const VERSAO: &str = "1.0.0.6";
 /// Repositório onde saem as versões novas (dono/nome).
 pub const REPOSITORIO: &str = "williamlala/baiacu-nfse";
 /// Nome do executável do programa empacotado.
@@ -132,15 +132,40 @@ pub fn modo_antigo() -> bool {
 }
 
 fn ler() -> Estado {
-    let t = crate::banco::get_meta(CHAVE_META).unwrap_or_default();
-    if t.trim().is_empty() {
-        return Estado::default();
-    }
-    serde_json::from_str(&t).unwrap_or_default()
+    serde_json::from_str(&crate::banco::get_meta(CHAVE_META).unwrap_or_default())
+        .unwrap_or_default()
 }
 
-fn gravar(e: &Estado) -> Res<()> {
-    crate::banco::set_meta(CHAVE_META, &serde_json::to_string(e)?)
+fn alterar_estado(alterar: impl FnOnce(&mut Estado)) -> Res<Estado> {
+    use rusqlite::{TransactionBehavior, params};
+    let mut con = crate::banco::conn()?;
+    let tx = con.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let mut e = serde_json::from_str(&crate::banco::get_meta_em(&tx, CHAVE_META)?)
+        .unwrap_or_default();
+    alterar(&mut e);
+    tx.execute(
+        "INSERT OR REPLACE INTO meta (chave, valor) VALUES (?1, ?2)",
+        params![CHAVE_META, serde_json::to_string(&e)?],
+    )?;
+    tx.commit()?;
+    Ok(e)
+}
+
+// A configuração continua disponível durante a consulta. Só as consultas concorrem por esta trava.
+static CONSULTA: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn guardar_consulta(antes: &Estado, depois: &Estado, ultima: Option<String>) -> Res<Estado> {
+    alterar_estado(|atual| {
+        if atual.etag == antes.etag && atual.cache == antes.cache {
+            atual.etag.clone_from(&depois.etag);
+            atual.cache.clone_from(&depois.cache);
+        }
+        if let Some(data) = ultima {
+            if atual.ultima < data {
+                atual.ultima = data;
+            }
+        }
+    })
 }
 
 pub fn estado() -> Res<Value> {
@@ -163,20 +188,20 @@ pub fn configurar(
     pular: Option<&str>,
     intervalo_horas: Option<u32>,
 ) -> Res<Value> {
-    let mut e = ler();
-    if let Some(v) = automatica {
-        e.automatica = v;
+    if intervalo_horas.is_some_and(|h| !OPCOES_INTERVALO.contains(&h)) {
+        return Err(erro("Intervalo de procura inválido."));
     }
-    if let Some(p) = pular {
-        e.pular = p.trim().to_string();
-    }
-    if let Some(h) = intervalo_horas {
-        if !OPCOES_INTERVALO.contains(&h) {
-            return Err(erro("Intervalo de procura inválido."));
+    alterar_estado(|e| {
+        if let Some(v) = automatica {
+            e.automatica = v;
         }
-        e.intervalo_horas = h;
-    }
-    gravar(&e)?;
+        if let Some(p) = pular {
+            e.pular = p.trim().to_string();
+        }
+        if let Some(h) = intervalo_horas {
+            e.intervalo_horas = h;
+        }
+    })?;
     estado()
 }
 
@@ -277,9 +302,13 @@ pub fn release_de(v: &Value) -> Res<Release> {
 pub const SEM_PUBLICACAO: &str = "Ainda não há nenhuma versão publicada para download.";
 
 fn ultima_release() -> Res<Release> {
-    let mut e = ler();
+    let _consulta = CONSULTA.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let antes = ler();
+    let mut e = antes.clone();
     let r = ultima_publicada(&mut e);
-    let _ = gravar(&e);
+    if antes.etag != e.etag || antes.cache != e.cache {
+        let _ = guardar_consulta(&antes, &e, None);
+    }
     r?.ok_or_else(|| erro(SEM_PUBLICACAO))
 }
 
@@ -350,16 +379,17 @@ pub fn ultima_publicada(e: &mut Estado) -> Res<Option<Release>> {
 /// "procurar sozinho" desligado e a versão pulada (devolve `{"disponivel": false}` sem ir à
 /// internet quando não é hora).
 pub fn verificar(automatica: bool, ao_entrar: bool) -> Res<Value> {
+    let _consulta = CONSULTA.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut e = ler();
     let agora = chrono::Utc::now();
     if automatica && (!e.automatica || !hora_de_procurar(&e, agora, ao_entrar)) {
         return Ok(json!({ "disponivel": false, "versao_atual": VERSAO, "consultou": false }));
     }
+    let antes = e.clone();
     let resultado = ultima_publicada(&mut e);
     // A contagem recomeça a cada procura, deu certo ou não: um GitHub fora do ar não vira
     // uma consulta a cada abertura do programa.
-    e.ultima = agora.to_rfc3339();
-    let _ = gravar(&e);
+    let e = guardar_consulta(&antes, &e, Some(agora.to_rfc3339())).unwrap_or_else(|_| ler());
     let Some(r) = resultado? else {
         return Ok(json!({
             "disponivel": false,
@@ -369,9 +399,9 @@ pub fn verificar(automatica: bool, ao_entrar: bool) -> Res<Value> {
         }));
     };
     let nova = mais_nova(&r.versao, VERSAO);
-    let pulada = automatica && !e.pular.is_empty() && e.pular == r.versao;
+    let suprimida = automatica && (!e.automatica || e.pular == r.versao);
     Ok(json!({
-        "disponivel": nova && !pulada,
+        "disponivel": nova && !suprimida,
         "consultou": true,
         "versao_atual": VERSAO,
         "versao": r.versao,

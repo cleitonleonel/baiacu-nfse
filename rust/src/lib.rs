@@ -19,6 +19,7 @@ pub mod cofre;
 pub mod config_dps;
 pub mod consulta;
 pub mod correio;
+mod dashboard;
 pub mod danfse;
 pub mod danfse_dados;
 pub mod despacho;

@@ -534,12 +534,11 @@ pub fn correlacoes_do_anexo(bytes: &[u8]) -> Res<Vec<Value>> {
     let linhas = crate::planilha::ler_xlsx(bytes, Some("tabela geral"), true)
         .or_else(|_| crate::planilha::ler_xlsx(bytes, None, true))?;
     let norm = |s: &str| s.trim().to_lowercase();
-    let (pos_cab, cab) = linhas
+    let (&pos_cab, cab) = linhas
         .iter()
-        .enumerate()
-        .find(|(_, l)| l.iter().any(|c| norm(c) == "nbs") && l.iter().any(|c| norm(c) == "cclasstrib"))
+        .find(|(_, l)| l.values().any(|c| norm(c) == "nbs") && l.values().any(|c| norm(c) == "cclasstrib"))
         .ok_or_else(|| Erro::valor("O Anexo VIII mudou de formato: cabeçalho não encontrado."))?;
-    let col = |f: &dyn Fn(&str) -> bool| cab.iter().position(|c| f(&norm(c)));
+    let col = |f: &dyn Fn(&str) -> bool| cab.iter().find_map(|(&i, c)| f(&norm(c)).then_some(i));
     let (Some(item), Some(nbs), Some(indop), Some(classe)) = (
         col(&|c| c.starts_with("item")),
         col(&|c| c == "nbs"),
@@ -549,8 +548,8 @@ pub fn correlacoes_do_anexo(bytes: &[u8]) -> Res<Vec<Value>> {
         return Err(Erro::valor("O Anexo VIII mudou de formato: faltam colunas."));
     };
     let mut vistos = BTreeSet::new();
-    for l in &linhas[pos_cab + 1..] {
-        let campo = |i: usize| l.get(i).map(|s| s.trim().to_string()).unwrap_or_default();
+    for (_, l) in linhas.range(pos_cab + 1..) {
+        let campo = |i: usize| l.get(&i).map(|s| s.trim().to_string()).unwrap_or_default();
         let (it, nb, op, cl) = (campo(item), so_digitos(&campo(nbs)), so_digitos(&campo(indop)), so_digitos(&campo(classe)));
         if it.is_empty() || nb.is_empty() || cl.is_empty() {
             continue;

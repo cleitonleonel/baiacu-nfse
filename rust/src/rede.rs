@@ -205,12 +205,16 @@ impl Sessao {
             })
             .collect();
         let url = r.get_uri().to_string();
-        let corpo = r
-            .body_mut()
-            .with_config()
-            .limit(1 << 30)
-            .read_to_vec()
-            .map_err(traduzir)?;
+        // Um 304 pode informar a codificação da representação em cache, sem enviar um corpo.
+        let corpo = match status {
+            ureq::http::StatusCode::NO_CONTENT | ureq::http::StatusCode::NOT_MODIFIED => Vec::new(),
+            _ => r
+                .body_mut()
+                .with_config()
+                .limit(1 << 30)
+                .read_to_vec()
+                .map_err(traduzir)?,
+        };
         Ok(Resposta {
             url,
             metodo: metodo.to_string(),

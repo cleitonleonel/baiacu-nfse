@@ -1080,9 +1080,9 @@ class App {
 
   // ---- navegação ---------------------------------------------------------------- //
   /// Telas (índice de navegação): 0 Emitir, 1 Clientes, 2 Consultar, 3 Configurações,
-  /// 4 Cofre. No trilho a ordem é outra — o Cofre entra no grupo de cima e Configurações é
-  /// o botão de baixo, fora dos destinos.
-  static const trilhoNav = [0, 5, 1, 2, 4];
+  /// 4 Cofre, 5 Lotes, 6 Dashboard. Configurações fica no rodapé do trilho.
+  static const trilhoNav = [navDashboard, 0, 5, 1, 2, 4];
+  static const navDashboard = 6;
   static const modulosNavegacao = [
     'emitir',
     'clientes',
@@ -1090,8 +1090,9 @@ class App {
     'config',
     'cofre',
     'lotes',
+    'dashboard',
   ];
-  static const navTrilho = {0: 0, 5: 1, 1: 2, 2: 3, 4: 4};
+  static const navTrilho = {navDashboard: 0, 0: 1, 5: 2, 1: 3, 2: 4, 4: 5};
 
   void irPara(int indice) {
     final chave = modulosNavegacao[indice];

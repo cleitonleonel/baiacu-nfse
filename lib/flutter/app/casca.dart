@@ -12,6 +12,7 @@ import '../telas/cofre.dart';
 import '../telas/clientes.dart';
 import '../telas/config.dart';
 import '../telas/consultar.dart';
+import '../telas/dashboard.dart';
 import '../telas/emitir.dart';
 import '../telas/lotes.dart';
 import 'ajuda.dart';
@@ -267,7 +268,7 @@ class _CascaState extends State<Casca> {
   }
 }
 
-/// As cinco telas, todas montadas; só a da vez aparece, recebe foco e anima.
+/// As telas ficam montadas. Só a da vez aparece, recebe foco e anima.
 class _Telas extends StatelessWidget {
   const _Telas({required this.app});
   final App app;
@@ -281,6 +282,7 @@ class _Telas extends StatelessWidget {
       TelaConfig(app: app),
       TelaCofre(app: app),
       TelaLotes(app: app),
+      TelaDashboard(app: app),
     ];
     return ValueListenableBuilder<int>(
       valueListenable: app.tiqueCasca,
@@ -435,6 +437,7 @@ class _TrilhoState extends State<_Trilho> {
     valueListenable: app.tiqueCasca,
     builder: (context, _, _) {
       const destinos = [
+        (Icons.space_dashboard_outlined, Icons.space_dashboard, 'Dashboard'),
         (Icons.receipt_long_outlined, Icons.receipt_long, 'Emitir'),
         (Icons.library_books_outlined, Icons.library_books, 'Emitir em Lote'),
         (Icons.people_outline, Icons.people, 'Clientes'),

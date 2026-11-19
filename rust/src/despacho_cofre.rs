@@ -42,6 +42,17 @@ fn pares(a: &Value, nome: &str) -> Vec<(String, String)> {
 
 pub fn executar(metodo: &str, a: &Value, avisar: Avisar) -> Option<Res<Value>> {
     Some(match metodo {
+        "dashboard.resumo" => (|| {
+            let dono = texto(a, "dono")?;
+            crate::permissoes::exigir_prestador_da_sessao(dono)?;
+            let anteriores = a.get("anteriores")
+                .map(|v| serde_json::from_value::<Vec<[String; 2]>>(v.clone()))
+                .transpose()?
+                .unwrap_or_default();
+            crate::dashboard::resumo(
+                dono, texto(a, "ini")?, texto(a, "fim")?, logico(a, "competencia"), &anteriores,
+            )
+        })(),
         // ---- busca --------------------------------------------------------------------- //
         "busca.rotulo" => js(busca::ROTULO),
         "busca.numero_exato" => js(busca::numero_exato(texto_ou(a, "consulta", ""))),

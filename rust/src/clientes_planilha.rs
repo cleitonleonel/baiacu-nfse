@@ -78,7 +78,7 @@ fn campo_do_cabecalho(nome: &str) -> Option<Campo> {
 }
 
 /// Lê o arquivo que o usuário escolheu (com a identidade dele, na instalação).
-fn ler_planilha(origem: &Path) -> Res<Vec<Vec<String>>> {
+fn ler_planilha(origem: &Path) -> Res<planilha::Linhas> {
     let bytes = crate::caminhos::arquivo_usuario(|| std::fs::read(origem))?;
     planilha::ler_bytes(&origem.to_string_lossy(), &bytes)
 }
@@ -130,17 +130,14 @@ struct Linha {
     erros: Vec<String>,
 }
 
-fn conferir(linhas: &[Vec<String>]) -> Res<Vec<Linha>> {
+fn conferir(linhas: &planilha::Linhas) -> Res<Vec<Linha>> {
     // O cabeçalho: a primeira das 5 primeiras linhas que tem a coluna do documento.
     let (pos_cab, mapa) = linhas
-        .iter()
-        .take(5)
-        .enumerate()
-        .find_map(|(i, l)| {
+        .range(..5)
+        .find_map(|(&i, l)| {
             let mapa: BTreeMap<Campo, usize> = l
                 .iter()
-                .enumerate()
-                .filter_map(|(c, nome)| campo_do_cabecalho(nome).map(|campo| (campo, c)))
+                .filter_map(|(&c, nome)| campo_do_cabecalho(nome).map(|campo| (campo, c)))
                 .rev() // a primeira ocorrência de cada campo vence
                 .collect();
             mapa.contains_key(&Campo::Doc).then_some((i, mapa))
@@ -160,14 +157,14 @@ fn conferir(linhas: &[Vec<String>]) -> Res<Vec<Linha>> {
     }
     let municipios = municipios();
     let mut out = Vec::new();
-    for (i, l) in linhas.iter().enumerate().skip(pos_cab + 1) {
+    for (&i, l) in linhas.range(pos_cab + 1..) {
         let v = |c: Campo| {
             mapa.get(&c)
-                .and_then(|&p| l.get(p))
+                .and_then(|p| l.get(p))
                 .map(|s| aparar(s).to_string())
                 .unwrap_or_default()
         };
-        if l.iter().all(|c| aparar(c).is_empty()) {
+        if l.values().all(|c| aparar(c).is_empty()) {
             continue;
         }
         let (tipo, doc) = documento(&v(Campo::Doc));
@@ -344,7 +341,11 @@ fn mesclar(mut atual: TomadorForm, novo: TomadorForm) -> TomadorForm {
     for c in novo.contatos.unwrap_or_default() {
         let igual = |x: &ContatoTomador| {
             x.tipo == c.tipo
-                && only_doc(&x.valor).to_lowercase() == only_doc(&c.valor).to_lowercase()
+                && if c.tipo == TipoContato::Email {
+                    x.valor.trim().to_lowercase() == c.valor.trim().to_lowercase()
+                } else {
+                    only_doc(&x.valor).eq_ignore_ascii_case(&only_doc(&c.valor))
+                }
         };
         if !contatos.iter().any(igual) {
             let tem_principal = contatos.iter().any(|x| x.tipo == c.tipo && x.principal);
@@ -566,7 +567,7 @@ mod testes {
         ];
         let bytes = xlsx(&[linha], true).unwrap();
         let lidas = planilha::ler_bytes("clientes.xlsx", &bytes).unwrap();
-        assert_eq!(lidas[0][0], "CPF/CNPJ");
+        assert_eq!(lidas[&0][&0], "CPF/CNPJ");
         let r = conferir(&lidas).unwrap();
         assert!(r[0].erros.is_empty(), "{:?}", r[0].erros);
         let f = r[0].form.as_ref().unwrap();
@@ -587,19 +588,19 @@ mod testes {
     #[test]
     fn confere_linhas_e_duplicados() {
         crate::caminhos::definir_raiz(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".."));
-        let p = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let linhas = vec![
-            p(&["CPF/CNPJ", "Nome", "Código IBGE", "E-mail"]),
-            p(&["12.345.678/0001-95", "EMPRESA A", "", "a@a.com"]),
-            p(&["12345678000195", "EMPRESA A DE NOVO", "", ""]),
-            p(&["111", "", "", "sem arroba"]),
-        ];
+        let linhas = planilha::ler_bytes("clientes.csv", concat!(
+            "CPF/CNPJ;Nome;Código IBGE;E-mail\n",
+            "12.345.678/0001-95;EMPRESA A;;a@a.com\n",
+            "12345678000195;EMPRESA A DE NOVO;;\n",
+            "111;;;sem arroba"
+        ).as_bytes()).unwrap();
         // Sem cidade/UF e sem IBGE preenchido: erro de município na linha, não na planilha.
         let r = conferir(&linhas).unwrap();
         assert_eq!(r.len(), 3);
         assert!(r[1].erros.iter().any(|e| e.contains("repetido")), "{:?}", r[1].erros);
         assert!(r[2].erros.iter().any(|e| e.contains("E-mail")), "{:?}", r[2].erros);
         assert!(r[2].erros.iter().any(|e| e.contains("Nome")), "{:?}", r[2].erros);
-        assert!(conferir(&[p(&["Nome", "Cidade"])]).is_err());
+        let sem_documento = planilha::ler_bytes("clientes.csv", b"Nome;Cidade").unwrap();
+        assert!(conferir(&sem_documento).is_err());
     }
 }

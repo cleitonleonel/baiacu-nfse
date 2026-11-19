@@ -88,6 +88,17 @@ fn sessao_ativa(sessao: &Option<Sessao>) -> Res<&Sessao> {
         .as_ref()
         .ok_or_else(|| Erro::valor("Entre no programa para continuar."))
 }
+
+pub(crate) fn exigir_prestador_da_sessao(prestador: &str) -> Res<()> {
+    let s = sessao()?;
+    let operador = usuario_atual(&sessao_ativa(&s)?.operador)?;
+    if !operador.is_master()
+        && !usuarios::prestadores_permitidos(&operador)?.iter().any(|p| p == prestador)
+    {
+        return Err(Erro::valor("Este prestador não está liberado para o seu usuário."));
+    }
+    Ok(())
+}
 pub fn validar(v: &Value) -> Res<BTreeMap<String, i64>> {
     if v["formato"] != "baiacu-permissoes" || v["versao"] != 1 {
         return Err(Erro::valor("Formato de permissões incompatível."));

@@ -34,6 +34,8 @@ const MANIFESTO: &str = "backup.json";
 /// é por ele que os backups já feitos continuam aceitos.
 const APP: &str = "Emissor NFSe";
 static TRAVA_BACKUP: Mutex<()> = Mutex::new(());
+pub(crate) static ACESSO: std::sync::RwLock<()> = std::sync::RwLock::new(());
+static PASTA_RECUPERADA: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /// Impede duas gravações simultâneas, inclusive chamadas de API concorrentes.
 pub fn em_andamento() -> bool {
@@ -442,6 +444,7 @@ fn extrair(zf: &mut Zip, parte: &str, destino: &Path) -> Res<()> {
         .map_err(|e| danificado(e.to_string()))?;
     let mut saida = std::fs::File::create(destino).map_err(|e| danificado(e.to_string()))?;
     std::io::copy(&mut origem, &mut saida).map_err(|e| danificado(e.to_string()))?; // o CRC é conferido ao chegar ao fim
+    saida.sync_all()?;
     Ok(())
 }
 
@@ -460,7 +463,191 @@ fn limpar(arquivo: &Path) {
 }
 
 fn temporario(parte: &str) -> PathBuf {
-    banco::caminho_db().with_file_name(format!("{}.restaurando", arquivo_de(parte)))
+    banco::caminho_db().with_file_name(format!("{}.extraido", arquivo_de(parte)))
+}
+
+const PENDENTE: &str = "restauracao.pendente";
+const CONCLUIDA: &str = "restauracao.concluida";
+const PREPARANDO: &str = "restauracao.preparando";
+
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
+enum ArquivoRestaurado {
+    Notas,
+    Dados,
+    Acesso,
+    CopiaNotas,
+}
+
+impl ArquivoRestaurado {
+    fn nome(self) -> &'static str {
+        match self {
+            Self::Notas => "notas.db",
+            Self::Dados => "dados.db",
+            Self::Acesso => "dados.key",
+            Self::CopiaNotas => "notas.db.bak",
+        }
+    }
+
+    fn novo(self, pasta: &Path) -> PathBuf {
+        pasta.join(format!("{}.restauracao-novo", self.nome()))
+    }
+
+    fn anterior(self, pasta: &Path) -> PathBuf {
+        pasta.join(format!("{}.restauracao-anterior", self.nome()))
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct Troca {
+    arquivo: ArquivoRestaurado,
+    existia: bool,
+}
+
+#[cfg(windows)]
+fn mover(de: &Path, para: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+    let largo = |c: &Path| c.as_os_str().encode_wide().chain([0]).collect::<Vec<_>>();
+    let (de, para) = (largo(de), largo(para));
+    // Ambos os caminhos apontam para buffers UTF-16 terminados em zero.
+    if unsafe { MoveFileExW(de.as_ptr(), para.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn mover(de: &Path, para: &Path) -> std::io::Result<()> {
+    std::fs::rename(de, para)?;
+    if let Some(pasta) = para.parent() {
+        let _ = std::fs::File::open(pasta).and_then(|f| f.sync_all());
+    }
+    Ok(())
+}
+
+fn apagar_se_existe(caminho: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(caminho) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        r => r,
+    }
+}
+
+fn recuperar(pasta: &Path) -> Res<()> {
+    let pendente = pasta.join(PENDENTE);
+    let concluida = pasta.join(CONCLUIDA);
+    if pendente.try_exists()? {
+        let trocas: Vec<Troca> = serde_json::from_slice(&std::fs::read(&pendente)?)?;
+        for t in trocas.iter().rev() {
+            let ativo = pasta.join(t.arquivo.nome());
+            let anterior = t.arquivo.anterior(pasta);
+            if anterior.try_exists()? {
+                mover(&anterior, &ativo)?;
+            } else if !t.existia {
+                apagar_se_existe(&ativo)?;
+            } else if !ativo.try_exists()? {
+                return Err(erro("Um dos bancos originais da restauração está indisponível."));
+            }
+        }
+        mover(&pendente, &concluida)?;
+        registro::aviso("backup", "Bancos originais recuperados após restauração interrompida.");
+    }
+    // Sem transação pendente, os ativos são definitivos. Restos de preparação ou limpeza
+    // podem ser removidos mesmo se o processo tiver terminado no primeiro ou no último passo.
+    for a in [
+        ArquivoRestaurado::Notas,
+        ArquivoRestaurado::Dados,
+        ArquivoRestaurado::Acesso,
+        ArquivoRestaurado::CopiaNotas,
+    ] {
+        limpar(&a.novo(pasta));
+        limpar(&a.anterior(pasta));
+    }
+    let _ = apagar_se_existe(&concluida);
+    let _ = apagar_se_existe(&pasta.join(PREPARANDO));
+    Ok(())
+}
+
+/// Antes de qualquer acesso lógico aos bancos, inclusive na primeira chamada após reiniciar.
+pub(crate) fn verificar_recuperacao() -> Res<()> {
+    let pasta = caminhos::raiz().join("database");
+    let mut feita = PASTA_RECUPERADA.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if feita.as_ref() != Some(&pasta) {
+        recuperar(&pasta).map_err(|e| erro(format!("Não foi possível recuperar os bancos originais da restauração. {e}")))?;
+        *feita = Some(pasta);
+    }
+    Ok(())
+}
+
+fn trocar_bancos(pasta: &Path, arquivos: &[ArquivoRestaurado]) -> Res<()> {
+    let mut trocas = Vec::new();
+    for &arquivo in arquivos {
+        let ativo = pasta.join(arquivo.nome());
+        for sufixo in ["-journal", "-wal", "-shm"] {
+            if pasta.join(format!("{}{sufixo}", arquivo.nome())).try_exists()? {
+                return Err(erro("Um banco tem uma transação pendente. Feche outras instâncias do Baiacu e tente restaurar novamente."));
+            }
+        }
+        if arquivo.anterior(pasta).try_exists()? {
+            return Err(erro("Há arquivos de uma restauração anterior em uso. Feche outras instâncias do Baiacu e tente novamente."));
+        }
+        trocas.push(Troca { arquivo, existia: ativo.try_exists()? });
+    }
+    let preparando = pasta.join(PREPARANDO);
+    let pendente = pasta.join(PENDENTE);
+    {
+        let mut f = std::fs::File::create(&preparando)?;
+        serde_json::to_writer(&mut f, &trocas)?;
+        f.sync_all()?;
+    }
+    *PASTA_RECUPERADA.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    mover(&preparando, &pendente)?;
+    let resultado = (|| -> Res<()> {
+        for t in trocas {
+            let ativo = pasta.join(t.arquivo.nome());
+            if t.existia {
+                mover(&ativo, &t.arquivo.anterior(pasta))?;
+            }
+            if !matches!(t.arquivo, ArquivoRestaurado::CopiaNotas) {
+                mover(&t.arquivo.novo(pasta), &ativo)?;
+            }
+        }
+        mover(&pendente, &pasta.join(CONCLUIDA))?;
+        Ok(())
+    })();
+    if let Err(e) = resultado {
+        verificar_recuperacao().map_err(|reversao| {
+            erro(format!("A troca dos bancos falhou ({e}). {reversao}"))
+        })?;
+        return Err(erro(format!("A troca dos bancos falhou. Os bancos originais foram preservados. {e}")));
+    }
+    verificar_recuperacao()?;
+    Ok(())
+}
+
+fn limpar_preparacao(pasta: &Path) {
+    if matches!(pasta.join(PENDENTE).try_exists(), Ok(false)) {
+        for a in [ArquivoRestaurado::Notas, ArquivoRestaurado::Dados, ArquivoRestaurado::Acesso] {
+            limpar(&a.novo(pasta));
+        }
+    }
+}
+
+pub(crate) fn restaurar_banco_dados(origem: &Path, senha_mestra: &str) -> Res<()> {
+    use ArquivoRestaurado::{Acesso, Dados};
+    let _trava = TRAVA_BACKUP
+        .try_lock()
+        .map_err(|_| erro("Já existe um backup ou uma restauração em andamento."))?;
+    verificar_recuperacao()?;
+    let pasta = caminhos::raiz().join("database");
+    let resultado = banco::preparar_restauracao(
+        origem, senha_mestra, &Dados.novo(&pasta), &Acesso.novo(&pasta), None,
+    ).and_then(|()| trocar_bancos(&pasta, &[Dados, Acesso]));
+    limpar_preparacao(&pasta);
+    resultado?;
+    banco::reiniciar_schema();
+    Ok(())
 }
 
 /// O que há no backup: {'partes', 'feito_em', 'tamanhos'}. Erro se o arquivo não serve, e de
@@ -503,6 +690,8 @@ pub fn restaurar(origem: &str, partes: &[String], senha_mestra: &str) -> Res<Vec
     let _trava = TRAVA_BACKUP
         .try_lock()
         .map_err(|_| erro("Já existe um backup ou uma restauração em andamento."))?;
+    verificar_recuperacao()?;
+    let pasta = caminhos::raiz().join("database");
     let pedidas = partes_pedidas(partes)?;
     let mut extraidos: Vec<(&str, PathBuf)> = Vec::new();
     let feito = (|| -> Res<()> {
@@ -531,25 +720,50 @@ pub fn restaurar(origem: &str, partes: &[String], senha_mestra: &str) -> Res<Vec
                 .find(|(p, _)| *p == parte)
                 .map(|(_, c)| c.clone())
         };
-        let mut chave_notas = Vec::new();
-        if let Some(d) = de(DADOS) {
-            banco::validar_banco(&d, senha_mestra)?;
-        }
+        use ArquivoRestaurado::{Acesso, CopiaNotas, Dados, Notas};
+        let mut arquivos = Vec::new();
+        let mut chave_nova = None;
         if let Some(n) = de(NOTAS) {
-            chave_notas = abrir_chave_notas(&m, senha_mestra)?;
-            cofre::conferir_arquivo(&n, &chave_notas)?;
+            let chave_backup = abrir_chave_notas(&m, senha_mestra)?;
+            cofre::conferir_arquivo(&n, &chave_backup)?;
+            let hexa = banco::get_meta(banco::META_CHAVE_NOTAS)?;
+            let chave = if hexa.is_empty() {
+                chave_nova.insert(chaves::aleatorio(32)).clone()
+            } else {
+                hex::decode(hexa).map_err(|_| erro("A chave local do banco de notas é inválida."))?
+            };
+            let novo = Notas.novo(&pasta);
+            limpar(&novo);
+            mover(&n, &novo)?;
+            cofre::preparar_restauracao(&novo, &chave_backup, &chave)?;
+            arquivos.extend([Notas, CopiaNotas]);
         }
-        if let Some(n) = de(NOTAS) {
-            cofre::substituir_por(&n, &chave_notas)?;
-        }
+        let novo = Dados.novo(&pasta);
         if let Some(d) = de(DADOS) {
-            banco::restaurar_de(&d, senha_mestra)?;
+            limpar(&novo);
+            banco::preparar_restauracao(
+                &d, senha_mestra, &novo, &Acesso.novo(&pasta), chave_nova.as_deref(),
+            )?;
+            arquivos.extend([Dados, Acesso]);
+        } else if let Some(chave) = chave_nova {
+            limpar(&novo);
+            banco::preparar_com_chave_notas(&novo, &chave)?;
+            arquivos.push(Dados);
+        }
+        trocar_bancos(&pasta, &arquivos)?;
+        if de(DADOS).is_some() {
+            banco::reiniciar_schema();
+        }
+        if de(NOTAS).is_some() {
+            cofre::finalizar_restauracao();
         }
         Ok(())
     })();
     for (_, arquivo) in &extraidos {
         limpar(arquivo);
     }
+    // Se falhou na preparação, nenhum banco chegou a ser movido.
+    limpar_preparacao(&pasta);
     feito?;
     let nomes: Vec<String> = extraidos.iter().map(|(p, _)| (*p).to_string()).collect();
     registro::aviso(

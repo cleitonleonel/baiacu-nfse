@@ -56,7 +56,10 @@ fn responder(metodo: &str, args: &str, avisar: despacho::Avisar) -> Value {
     // Um erro de programação numa chamada não pode derrubar o programa inteiro.
     let mut v = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         #[cfg(windows)]
-        if crate::dados_windows::cliente_instalado() && !crate::dados_windows::metodo_local(metodo) {
+        if crate::dados_windows::cliente_instalado() {
+            if crate::dados_windows::metodo_local(metodo) {
+                return despacho::chamar_local(metodo, &args, avisar);
+            }
             if matches!(metodo, "atualizacao.baixar" | "atualizacao.instalar") {
                 let permissao = crate::dados_windows::chamar(
                     "dados.autorizar_atualizacao", &json!({"metodo":metodo}), &|_| {},

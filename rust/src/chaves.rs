@@ -224,6 +224,15 @@ fn conteudo_esperado(con: &Connection) -> Res<Vec<u8>> {
     ))
 }
 
+pub(crate) fn preparar_arquivo_acesso(con: &Connection, destino: &Path) -> Res<()> {
+    use std::io::Write;
+    let conteudo = conteudo_esperado(con)?;
+    let mut arquivo = fs::File::create(destino)?;
+    arquivo.write_all(&conteudo)?;
+    arquivo.sync_all()?;
+    Ok(())
+}
+
 /// Conteúdo do dados.key, ou None se ausente/corrompido (soma de verificação não bate).
 fn ler_arquivo() -> Option<Value> {
     let bytes = fs::read(arquivo()).ok()?;

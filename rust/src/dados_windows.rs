@@ -357,15 +357,13 @@ fn resposta(pedido: Pedido, avisar: despacho::Avisar) -> Value {
     }
     if metodo == "dados.autorizar_atualizacao" {
         let alvo = pedido.args["metodo"].as_str().unwrap_or_default();
-        return match alvo {
+        return despacho::envelope(despacho::com_acesso(metodo, || match alvo {
             "atualizacao.baixar" | "atualizacao.instalar" => {
-                match permissoes::checar_metodo(alvo, &pedido.args) {
-                    Ok(()) => json!({"ok":null}),
-                    Err(e) => json!({"erro":{"tipo":e.tipo,"msg":e.msg}}),
-                }
+                permissoes::checar_metodo(alvo, &pedido.args)?;
+                Ok(Value::Null)
             }
-            _ => json!({"erro":{"tipo":"ValueError","msg":"Operação de atualização inválida."}}),
-        };
+            _ => Err(crate::erro::Erro::valor("Operação de atualização inválida.")),
+        }));
     }
     if metodo_local(metodo)
         || matches!(
@@ -375,26 +373,28 @@ fn resposta(pedido: Pedido, avisar: despacho::Avisar) -> Value {
     {
         return json!({"erro":{"tipo":"ValueError","msg":"Operação indisponível no serviço de dados."}});
     }
-    if !matches!(
-        metodo,
-        "banco.estado"
-            | "banco.destrancado"
-            | "banco.trancar"
-            | "banco.get_meta"
-            | "chaves.arquivo_integro"
-            | "chaves.criar_banco"
-            | "chaves.desfazer_criacao"
-            | "chaves.destrancar_com_mestra"
-            | "usuarios.entrar"
-            | "usuarios.criar"
-            | "usuarios.redefinir_senha_master"
-            | "registro.registrar"
-            | "registro.sincronizar"
-    ) && !permissoes::sessao_autenticada()
-    {
-        return json!({"erro":{"tipo":"BancoTrancado","msg":"Entre no Baiacu para continuar."}});
-    }
-    despacho::chamar_avisando(metodo, &pedido.args, avisar)
+    despacho::chamar_servico(metodo, &pedido.args, avisar, || {
+        if !matches!(
+            metodo,
+            "banco.estado"
+                | "banco.destrancado"
+                | "banco.trancar"
+                | "banco.get_meta"
+                | "chaves.arquivo_integro"
+                | "chaves.criar_banco"
+                | "chaves.desfazer_criacao"
+                | "chaves.destrancar_com_mestra"
+                | "usuarios.entrar"
+                | "usuarios.criar"
+                | "usuarios.redefinir_senha_master"
+                | "registro.registrar"
+                | "registro.sincronizar"
+        ) && !permissoes::sessao_autenticada()
+        {
+            return Err(crate::erro::Erro::trancado("Entre no Baiacu para continuar."));
+        }
+        Ok(())
+    })
 }
 
 fn atender(mut canal: File, estado: &Mutex<Option<Arc<Cliente>>>) -> io::Result<()> {

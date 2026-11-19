@@ -99,6 +99,20 @@ class Tamanho {
   final double? altura;
 }
 
+const larguraFiltroData = 154.0;
+const larguraFiltroPeriodo = 200.0;
+
+abstract final class TamanhosDashboard {
+  static const periodo = Tamanho(largura: larguraFiltroPeriodo, id: 'Dashboard.periodo');
+  static const base = Tamanho(largura: larguraFiltroData, id: 'Dashboard.base');
+  static const modo = Tamanho(largura: 158, id: 'Dashboard.modo');
+  static const visibilidade = Tamanho(largura: 40, altura: 40, id: 'Dashboard.visibilidade');
+  static const aproximar = Tamanho(largura: 36, altura: 36, id: 'Dashboard.grafico.aproximar');
+  static const afastar = Tamanho(largura: 36, altura: 36, id: 'Dashboard.grafico.afastar');
+  static const repetir = Tamanho(id: 'Dashboard.repetir');
+  static const cofre = Tamanho(id: 'Dashboard.cofre');
+}
+
 /// Clientes - listagem e pesquisa.
 abstract final class TamanhosClientes {
   /// Importar/exportar clientes
@@ -338,6 +352,9 @@ abstract final class TamanhosDadosCliente {
 
 /// Serviços e tributos - cadastro do cliente.
 abstract final class TamanhosServicosTributos {
+  static const botaoRecarregarServicos = Tamanho(
+    largura: null, altura: null, id: 'TamanhosServicosTributos.botaoRecarregarServicos',
+  );
   /// rotulo
   static const campoRotulo = Tamanho(
     largura: 520,

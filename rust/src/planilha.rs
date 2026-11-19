@@ -2,12 +2,30 @@
 //!
 //! Serve à importação de clientes e às tabelas oficiais (Anexo VIII da NFS-e), que usam
 //! células mescladas: com `expandir`, o valor de uma mesclagem vale para todas as suas células.
+use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::path::Path;
 
 use calamine::{Data, Reader};
 
 use crate::erro::{Erro, Res};
+
+pub type Linhas = BTreeMap<usize, BTreeMap<usize, String>>;
+
+const MAX_LINHAS: usize = 1_048_576;
+const MAX_COLUNAS: usize = 16_384;
+const MAX_CELULAS: usize = 2_000_000;
+
+fn dimensoes_excessivas() -> Erro {
+    Erro::valor("A planilha excede o tamanho suportado. Copie a tabela para uma nova aba e divida os dados em arquivos menores.")
+}
+
+fn conferir_limites(linha: usize, coluna: usize, total: usize) -> Res<()> {
+    if linha >= MAX_LINHAS || coluna >= MAX_COLUNAS || total > MAX_CELULAS {
+        return Err(dimensoes_excessivas());
+    }
+    Ok(())
+}
 
 /// Texto de uma célula, como o usuário a vê: números inteiros sem ".0".
 pub fn texto_celula(d: &Data) -> String {
@@ -27,7 +45,7 @@ pub fn texto_celula(d: &Data) -> String {
 }
 
 /// Linhas de uma aba de um .xlsx em memória (`aba` = None: a primeira).
-pub fn ler_xlsx(bytes: &[u8], aba: Option<&str>, expandir: bool) -> Res<Vec<Vec<String>>> {
+pub fn ler_xlsx(bytes: &[u8], aba: Option<&str>, expandir: bool) -> Res<Linhas> {
     let mut wb = calamine::Xlsx::new(Cursor::new(bytes))
         .map_err(|e| Erro::valor(format!("Planilha ilegível: {e}")))?;
     let nome = match aba {
@@ -38,24 +56,43 @@ pub fn ler_xlsx(bytes: &[u8], aba: Option<&str>, expandir: bool) -> Res<Vec<Vec<
             .cloned()
             .ok_or_else(|| Erro::valor("A planilha não tem abas."))?,
     };
-    let faixa = wb
-        .worksheet_range(&nome)
-        .map_err(|e| Erro::valor(format!("Aba \"{nome}\" ilegível: {e}")))?;
-    let mut linhas = grade(&faixa);
+    let ilegivel = |e| Erro::valor(format!("Aba \"{nome}\" ilegível: {e}"));
+    let mut linhas = Linhas::new();
+    let mut total = 0;
+    {
+        // worksheet_range materializa o retângulo entre as células extremas.
+        let mut leitor = wb.worksheet_cells_reader(&nome).map_err(ilegivel)?;
+        while let Some(celula) = leitor.next_cell().map_err(ilegivel)? {
+            let (l, c) = celula.get_position();
+            let (l, c) = (l as usize, c as usize);
+            let valor = texto_celula(&Data::from(celula.get_value().clone()));
+            if !valor.is_empty() {
+                total += 1;
+                conferir_limites(l, c, total)?;
+                linhas.entry(l).or_default().insert(c, valor);
+            }
+        }
+    }
     if expandir {
         if let Ok(mesclas) = wb.merge_cells_by_sheet_name(&nome) {
             for m in mesclas {
                 let (r0, c0) = (m.start.0 as usize, m.start.1 as usize);
                 let valor = linhas
-                    .get(r0)
-                    .and_then(|l| l.get(c0))
+                    .get(&r0)
+                    .and_then(|l| l.get(&c0))
                     .cloned()
                     .unwrap_or_default();
-                for r in r0..=(m.end.0 as usize) {
-                    for c in c0..=(m.end.1 as usize) {
-                        if let Some(cel) = linhas.get_mut(r).and_then(|l| l.get_mut(c)) {
-                            *cel = valor.clone();
-                        }
+                if valor.is_empty() {
+                    continue;
+                }
+                let (r1, c1) = (m.end.0 as usize, m.end.1 as usize);
+                conferir_limites(r1, c1, total)?;
+                total += (r1.saturating_sub(r0) + 1) * (c1.saturating_sub(c0) + 1);
+                conferir_limites(r1, c1, total)?;
+                for r in r0..=r1 {
+                    let linha = linhas.entry(r).or_default();
+                    for c in c0..=c1 {
+                        linha.insert(c, valor.clone());
                     }
                 }
             }
@@ -64,32 +101,42 @@ pub fn ler_xlsx(bytes: &[u8], aba: Option<&str>, expandir: bool) -> Res<Vec<Vec<
     Ok(linhas)
 }
 
-/// A faixa de células como grade a partir de A1 (as coordenadas das mesclagens são absolutas).
-fn grade(faixa: &calamine::Range<Data>) -> Vec<Vec<String>> {
-    let Some((fim_l, fim_c)) = faixa.end() else {
-        return Vec::new();
+/// Mantém as coordenadas da aba sem materializar células vazias na prévia.
+fn ler_faixa(faixa: &calamine::Range<Data>) -> Res<Linhas> {
+    let Some((inicio_l, inicio_c)) = faixa.start() else {
+        return Ok(Linhas::new());
     };
-    let mut linhas = vec![vec![String::new(); fim_c as usize + 1]; fim_l as usize + 1];
+    let mut linhas = Linhas::new();
+    let mut total = 0;
     for (l, c, d) in faixa.used_cells() {
-        let (l, c) = (
-            l + faixa.start().map_or(0, |s| s.0 as usize),
-            c + faixa.start().map_or(0, |s| s.1 as usize),
-        );
-        if let Some(cel) = linhas.get_mut(l).and_then(|x| x.get_mut(c)) {
-            *cel = texto_celula(d);
+        let (l, c) = (l + inicio_l as usize, c + inicio_c as usize);
+        let valor = texto_celula(d);
+        if !valor.is_empty() {
+            total += 1;
+            conferir_limites(l, c, total)?;
+            linhas.entry(l).or_default().insert(c, valor);
         }
     }
-    linhas
+    Ok(linhas)
 }
 
 /// Linhas da primeira aba de uma planilha em memória; `nome` (do arquivo) decide o formato.
-pub fn ler_bytes(nome: &str, bytes: &[u8]) -> Res<Vec<Vec<String>>> {
+pub fn ler_bytes(nome: &str, bytes: &[u8]) -> Res<Linhas> {
     let ext = Path::new(nome)
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
     match ext.as_str() {
-        "csv" | "txt" => Ok(ler_csv(&decodificar(bytes))),
+        "csv" | "txt" => Ok(ler_csv(&decodificar(bytes))
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, linha)| {
+                let celulas: BTreeMap<_, _> = linha.into_iter().enumerate()
+                    .filter(|(_, valor)| !valor.is_empty())
+                    .collect();
+                (!celulas.is_empty()).then_some((i, celulas))
+            })
+            .collect()),
         "xlsx" | "xlsm" => ler_xlsx(bytes, None, false),
         "xls" | "ods" => {
             let mut wb = calamine::open_workbook_auto_from_rs(Cursor::new(bytes))
@@ -102,7 +149,7 @@ pub fn ler_bytes(nome: &str, bytes: &[u8]) -> Res<Vec<Vec<String>>> {
             let faixa = wb
                 .worksheet_range(&aba)
                 .map_err(|e| Erro::valor(format!("Aba \"{aba}\" ilegível: {e}")))?;
-            Ok(grade(&faixa))
+            ler_faixa(&faixa)
         }
         _ => Err(Erro::valor(
             "Formato não suportado. Use planilha Excel (.xlsx, .xls), OpenDocument (.ods) ou CSV.",

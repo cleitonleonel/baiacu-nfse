@@ -2249,69 +2249,27 @@ pub fn conferir_arquivo(arquivo: &Path, chave: &[u8]) -> Res<()> {
     Ok(())
 }
 
-/// Troca o banco de notas INTEIRO pelo `arquivo` — um notas.db saído de um backup, cifrado com
-/// `chave_dele`. `arquivo` é consumido: vira o notas.db.
-///
-/// O arquivo é primeiro RECIFRADO com a chave desta instalação e só então trocado de uma vez
-/// (troca de nome). A chave guardada no dados.db não muda em momento nenhum: cair no meio deixa
-/// ou o banco de antes ou o novo, e os dois abrem. A cópia de segurança era do conteúdo antigo:
-/// é refeita a partir do banco novo ou, se não der, apagada.
-pub fn substituir_por(arquivo: &Path, chave_dele: &[u8]) -> Res<()> {
-    let Some(_trava) = TravaSinc::pegar() else {
-        return Err(erro(
-            "Há uma sincronização do Cofre em andamento: espere terminar (ou cancele) e tente de novo.",
-        ));
-    };
-    {
-        let mut est = estado()
-            .lock()
-            .map_err(|_| erro("O banco de notas está indisponível."))?;
-        let hexa = banco::get_meta(banco::META_CHAVE_NOTAS)?;
-        let minha = if hexa.is_empty() {
-            let nova = crate::chaves::aleatorio(32);
-            banco::set_meta(banco::META_CHAVE_NOTAS, &hex::encode(&nova))?;
-            nova
-        } else {
-            hex::decode(&hexa).map_err(|_| {
-                ilegivel("A chave do banco de notas guardada no banco de dados é inválida.")
-            })?
-        };
-        if minha != chave_dele {
-            let con = ligar(chave_dele, arquivo)?;
-            con.execute_batch(&format!("PRAGMA rekey = \"x'{}'\";", hex::encode(&minha)))?;
-        }
-        drop(ligar(&minha, arquivo)?); // abre com a chave daqui?
-        let db = caminho_db();
-        if existe() {
-            // Um diário de transação interrompida do banco ANTIGO não pode sobrar ao lado do novo
-            // (o SQLite o aplicaria no arquivo errado): abrir resolve o diário.
-            let _ = ligar(&minha, &db); // o antigo nem abre: vai ser trocado mesmo
-        }
-        let mut trocou = false;
-        for tentativa in 0..25 {
-            match std::fs::rename(arquivo, &db) {
-                Ok(()) => {
-                    trocou = true;
-                    break;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                    if tentativa == 24 {
-                        return Err(erro(
-                            "O banco de notas está em uso e não pôde ser trocado. Feche as telas que o usam e tente de novo.",
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_millis(200));
-                }
-                Err(e) => return Err(e.into()),
-            }
-        }
-        if !trocou {
-            return Err(erro("O banco de notas não pôde ser trocado."));
-        }
-        let _ = std::fs::remove_file(com_sufixo(&db, "-journal"));
-        est.pronto = None;
-        limpar_caches();
+/// Recifra a cópia já validada e a deixa pronta para a troca coordenada pelo backup.
+pub(crate) fn preparar_restauracao(arquivo: &Path, chave_dele: &[u8], chave_local: &[u8]) -> Res<()> {
+    if chave_local != chave_dele {
+        let con = ligar(chave_dele, arquivo)?;
+        con.execute_batch(&format!("PRAGMA rekey = \"x'{}'\";", hex::encode(chave_local)))?;
     }
+    drop(ligar(chave_local, arquivo)?);
+    std::fs::OpenOptions::new().write(true).open(arquivo)?.sync_all()?;
+    // Resolve um possível diário antigo antes de trocar arquivos. Um banco ilegível pode
+    // ser substituído desde que não tenha um diário pendente ao lado (verificado pelo backup).
+    if existe() {
+        let _ = ligar(chave_local, &caminho_db());
+    }
+    Ok(())
+}
+
+pub(crate) fn finalizar_restauracao() {
+    if let Ok(mut est) = estado().lock() {
+        est.pronto = None;
+    }
+    limpar_caches();
     let mb = std::fs::metadata(caminho_db())
         .map(|m| m.len() as f64 / 1_048_576.0)
         .unwrap_or(0.0);
@@ -2330,7 +2288,6 @@ pub fn substituir_por(arquivo: &Path, chave_dele: &[u8]) -> Res<()> {
         let _ = std::fs::remove_file(&copia);
         let _ = std::fs::remove_file(com_sufixo(&copia, "-journal"));
     }
-    Ok(())
 }
 
 /// Cuidado periódico do banco de notas (uma vez por sessão e depois de sincronizar): confere; se
@@ -3016,7 +2973,7 @@ fn xml_da_nota_em(con: &Connection, nota_id: i64) -> Res<Vec<u8>> {
         .ok_or_else(|| erro("O XML desta nota não está no banco de notas."))
 }
 
-fn xml_disponivel_em(con: &Connection, nota_id: i64) -> Res<Option<Vec<u8>>> {
+pub(crate) fn xml_disponivel_em(con: &Connection, nota_id: i64) -> Res<Option<Vec<u8>>> {
     let linha: Option<(Vec<u8>, String, i64, Vec<u8>)> = con
         .query_row(
             "SELECT sha, certs, molde, dados FROM nota_xml WHERE nota=?1",

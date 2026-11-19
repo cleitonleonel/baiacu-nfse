@@ -370,6 +370,25 @@ pub fn exists_ini(caminho: &str) -> Res<bool> {
     caminhos::arquivo_usuario(|| Ok(caminhos::absoluto(caminho).exists()))
 }
 
+/// Lê os INIs de um diretório lógico em uma única consulta, incluindo os vazios.
+pub(crate) fn load_inis(caminho: &str) -> Res<std::collections::BTreeMap<String, Ini>> {
+    let con = conn()?;
+    let mut st = con.prepare(
+        "SELECT a.nome, c.secao, c.opcao, c.valor FROM arquivo a
+         LEFT JOIN config c ON c.arquivo = a.nome
+         WHERE a.nome LIKE ?1 ESCAPE '\\' ORDER BY a.nome",
+    )?;
+    let mut linhas = st.query([like(&format!("{}%", prefixo(caminho)))])?;
+    let mut arquivos = std::collections::BTreeMap::<String, Ini>::new();
+    while let Some(r) = linhas.next()? {
+        let ini = arquivos.entry(r.get(0)?).or_insert_with(Ini::novo);
+        if let Some(secao) = r.get::<_, Option<String>>(1)? {
+            ini.por(&secao, &r.get::<_, String>(2)?, &r.get::<_, String>(3)?);
+        }
+    }
+    Ok(arquivos)
+}
+
 /// Grava o Ini: no BANCO (chaves gerenciadas) ou no arquivo (demais).
 pub fn save_ini(caminho: &str, ini: &Ini) -> Res<()> {
     if !gerenciado(caminho) {
@@ -705,8 +724,17 @@ pub fn validar_banco(caminho: &Path, senha_mestra: &str) -> Res<()> {
 /// O banco novo é montado num arquivo à parte, já cifrado com a chave atual, e trocado de uma
 /// vez: falhando antes da troca, nada muda. O processo deve REINICIAR em seguida.
 pub fn restaurar_de(origem: &Path, senha_mestra: &str) -> Res<()> {
-    let db = caminho_db();
-    if caminhos::normalizar(origem) == caminhos::normalizar(&db) {
+    crate::backup::restaurar_banco_dados(origem, senha_mestra)
+}
+
+pub(crate) fn preparar_restauracao(
+    origem: &Path,
+    senha_mestra: &str,
+    novo: &Path,
+    acesso: &Path,
+    chave_notas_nova: Option<&[u8]>,
+) -> Res<()> {
+    if caminhos::normalizar(origem) == caminhos::normalizar(&caminho_db()) {
         return Err(Erro::valor(
             "Este arquivo já é o banco em uso por esta instalação. Escolha um arquivo de backup.",
         ));
@@ -715,48 +743,56 @@ pub fn restaurar_de(origem: &Path, senha_mestra: &str) -> Res<()> {
         return Err(Erro::trancado("Só um usuário logado restaura um backup."));
     };
     validar_banco(origem, senha_mestra)?;
-    let chave_notas = get_meta(META_CHAVE_NOTAS)?;
+    let chave_notas = match chave_notas_nova {
+        Some(chave) => hex::encode(chave),
+        None => get_meta(META_CHAVE_NOTAS)?,
+    };
     let permissoes = get_meta(crate::permissoes::META)?;
-    let copia = PathBuf::from(format!("{}.origem", db.display()));
-    let novo = PathBuf::from(format!("{}.novo", db.display()));
-    let resultado = (|| -> Res<()> {
-        fs::copy(origem, &copia)?;
-        let (chave_b, sal_b) = chave_do_backup(&copia, senha_mestra)?;
-        {
-            let fonte = abrir(&copia, &chave_b, &sal_b)?;
-            crate::chaves::exportar(&fonte, &novo, &chave, &sal)?;
-        }
-        {
-            let mut con = abrir(&novo, &chave, &sal)?;
-            criar_tabelas(&con)?;
-            crate::usuarios::levar_master_para(&mut con)?;
-            crate::chaves::reembrulhar(&mut con, &chave)?;
-            if permissoes.is_empty() {
-                con.execute("DELETE FROM meta WHERE chave = ?1", [crate::permissoes::META])?;
-            } else {
-                con.execute(
-                    "INSERT OR REPLACE INTO meta (chave, valor) VALUES (?1, ?2)",
-                    params![crate::permissoes::META, permissoes],
-                )?;
-            }
-            if chave_notas.is_empty() {
-                con.execute("DELETE FROM meta WHERE chave = ?1", [META_CHAVE_NOTAS])?;
-            } else {
-                con.execute(
-                    "INSERT OR REPLACE INTO meta (chave, valor) VALUES (?1, ?2)",
-                    params![META_CHAVE_NOTAS, chave_notas],
-                )?;
-            }
-        }
-        substituir_banco(&novo)
-    })();
-    for sufixo in ["", "-journal"] {
-        let _ = fs::remove_file(format!("{}{}", copia.display(), sufixo));
+    let copia = ArquivoCopia::novo("dados-origem")?;
+    fs::copy(origem, &copia.0)?;
+    let (chave_b, sal_b) = chave_do_backup(&copia.0, senha_mestra)?;
+    {
+        let fonte = abrir(&copia.0, &chave_b, &sal_b)?;
+        crate::chaves::exportar(&fonte, novo, &chave, &sal)?;
     }
-    let _ = fs::remove_file(&novo);
-    resultado?;
-    reiniciar_schema();
-    crate::chaves::sincronizar()?;
+    {
+        let mut con = abrir(&novo, &chave, &sal)?;
+        criar_tabelas(&con)?;
+        crate::usuarios::levar_master_para(&mut con)?;
+        crate::chaves::reembrulhar(&mut con, &chave)?;
+        if permissoes.is_empty() {
+            con.execute("DELETE FROM meta WHERE chave = ?1", [crate::permissoes::META])?;
+        } else {
+            con.execute(
+                "INSERT OR REPLACE INTO meta (chave, valor) VALUES (?1, ?2)",
+                params![crate::permissoes::META, permissoes],
+            )?;
+        }
+        if chave_notas.is_empty() {
+            con.execute("DELETE FROM meta WHERE chave = ?1", [META_CHAVE_NOTAS])?;
+        } else {
+            con.execute(
+                "INSERT OR REPLACE INTO meta (chave, valor) VALUES (?1, ?2)",
+                params![META_CHAVE_NOTAS, chave_notas],
+            )?;
+        }
+        crate::chaves::preparar_arquivo_acesso(&con, acesso)?;
+    }
+    fs::OpenOptions::new().write(true).open(novo)?.sync_all()?;
+    Ok(())
+}
+
+pub(crate) fn preparar_com_chave_notas(novo: &Path, chave_notas: &[u8]) -> Res<()> {
+    let (chave, sal) = chave_atual().ok_or_else(|| Erro::trancado("O banco está trancado."))?;
+    {
+        let mut destino = abrir(novo, &chave, &sal)?;
+        copiar_paginas(&conn()?, &mut destino)?;
+        destino.execute(
+            "INSERT OR REPLACE INTO meta (chave, valor) VALUES (?1, ?2)",
+            params![META_CHAVE_NOTAS, hex::encode(chave_notas)],
+        )?;
+    }
+    fs::OpenOptions::new().write(true).open(novo)?.sync_all()?;
     Ok(())
 }
 

@@ -97,7 +97,8 @@
     "fixo": false,
     "metodos": [
       "cadastro.save_tomador_form",
-      "cadastro.rename_tomador"
+      "cadastro.rename_tomador",
+      "cadastro.formularios_servicos"
     ]
   },
   {
@@ -831,5 +832,13 @@
     "padrao": 1,
     "fixo": false,
     "metodos": ["exportacao.lotes_zip"]
+  },
+  {
+    "id": "dashboard",
+    "rotulo": "Dashboard",
+    "pai": "",
+    "padrao": 1,
+    "fixo": false,
+    "metodos": ["dashboard.resumo"]
   }
 ]

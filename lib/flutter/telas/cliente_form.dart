@@ -151,34 +151,9 @@ void abrirCliente(
   final removidos =
       <String>{}; // serviços excluídos, apagados do banco ao Salvar
 
-  /// Põe na memória os serviços GRAVADOS do cliente ([documento] vazio = cliente novo).
-  void lerServicos(String documento) {
-    servicos.clear();
-    ordem.clear();
-    novos.clear();
-    removidos.clear();
-    if (documento.isNotEmpty) {
-      final infos = jaLista('cadastro.list_servicos', {
-        'prestador': p,
-        'tomador': documento,
-      });
-      for (final i in infos) {
-        final s = i['slug'] as String;
-        servicos[s] = jaMapa('cadastro.get_servico', {
-          'prestador': p,
-          'tomador': documento,
-          'servico': s,
-        });
-        ordem.add(s);
-      }
-    }
-  }
-
   if (servicoDoLote != null && slug != null) {
     servicos[slug] = Map<String, dynamic>.from(servicoDoLote);
     ordem.add(slug);
-  } else {
-    lerServicos(editando ? fs('documento') : '');
   }
   // Estado da janela: serviço em edição, se já é um cliente salvo e o documento salvo (o
   // Salvar NÃO fecha a janela: "novo cliente" vira "edição" depois do 1º salvar).
@@ -189,6 +164,8 @@ void abrirCliente(
   var jaSalvo = editando;
   var docSalvo = editando ? soDoc(fs('documento')) : '';
   var abaAtual = emLote ? 1 : aba;
+  var carregandoServicos = false;
+  var falhaServicos = false;
 
   String proximoSlug() {
     final usados = {...servicos.keys, ...removidos};
@@ -982,6 +959,48 @@ void abrirCliente(
     carregarServico(servicos[slugAtual] ?? {});
   }
 
+  Future<void> lerServicos(String preferido) async {
+    if (docSalvo.isEmpty || carregandoServicos) return;
+    final documento = docSalvo;
+    bool janelaAtual() => app.dialogoAberto(d) && app.prestador == p;
+    carregandoServicos = true;
+    falhaServicos = false;
+    d.atualizar();
+    try {
+      final dados = await chamar<List>('cadastro.formularios_servicos', {
+        'prestador': p,
+        'tomador': documento,
+      });
+      if (!janelaAtual() || docSalvo != documento) return;
+      final carregados = {
+        for (final linha in dados.cast<List>())
+          linha[0] as String: Map<String, dynamic>.from(linha[1] as Map),
+      };
+      servicos
+        ..clear()
+        ..addAll(carregados);
+      ordem
+        ..clear()
+        ..addAll(carregados.keys);
+      novos.clear();
+      removidos.clear();
+      editaServ = false;
+      trocarPara(
+        ordem.contains(preferido) ? preferido : (ordem.isEmpty ? '' : ordem.first),
+      );
+    } catch (e) {
+      if (!janelaAtual() || docSalvo != documento) return;
+      falhaServicos = true;
+      app.toast('Não foi possível carregar os serviços. $e', erro: true);
+    } finally {
+      if (janelaAtual()) {
+        carregandoServicos = false;
+        d.atualizar();
+        if (docSalvo != documento) unawaited(lerServicos(preferido));
+      }
+    }
+  }
+
   void novoServico() {
     if (!app.temPermissao('clientes.servicos')) {
       app.exigirPermissao('clientes.servicos', novoServico);
@@ -1001,12 +1020,16 @@ void abrirCliente(
   /// serviço novo, exclusão à espera do Salvar) e re-trava a aba. Os dados do cliente, na outra
   /// aba, ficam como estão.
   void cancelarServico() {
-    final onde = slugAtual;
-    lerServicos(docSalvo);
-    editaServ = false;
-    trocarPara(
-      ordem.contains(onde) ? onde : (ordem.isEmpty ? '' : ordem.first),
-    );
+    if (docSalvo.isEmpty) {
+      editaServ = false;
+      servicos.clear();
+      ordem.clear();
+      novos.clear();
+      removidos.clear();
+      trocarPara('');
+      return;
+    }
+    unawaited(lerServicos(slugAtual));
   }
 
   void excluirServicoConfirmado() {
@@ -1963,6 +1986,21 @@ void abrirCliente(
   }
 
   Widget abaServico() {
+    if (carregandoServicos) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (falhaServicos) {
+      return Center(
+        child: Botao.contorno(
+          'Tentar carregar serviços novamente',
+          icone: Icons.refresh,
+          aoClicar: () => lerServicos(slugAtual.isEmpty ? (slug ?? '') : slugAtual),
+          largura: TamanhosServicosTributos.botaoRecarregarServicos.largura,
+          altura: TamanhosServicosTributos.botaoRecarregarServicos.altura,
+          idLayout: TamanhosServicosTributos.botaoRecarregarServicos.id,
+        ),
+      );
+    }
     final t = !editaServ || !temServico();
     final semCalc = (ddCst.valor ?? '01') == '00';
     final naoRetido = (ddRet.valor ?? '0') == '0';
@@ -3035,7 +3073,7 @@ void abrirCliente(
                   altura: TamanhosServicosTributos.botaoExcluirCliente.altura,
                   idLayout: 'TamanhosServicosTributos.botaoExcluirCliente',
                 ),
-              if (abaAtual == 1 && !editaServ)
+              if (abaAtual == 1 && !editaServ && !carregandoServicos && !falhaServicos)
                 Botao.contorno(
                   'Excluir serviço',
                   desabilitado: !temServico(),
@@ -3048,7 +3086,7 @@ void abrirCliente(
                 ),
               // Em edição o lugar é do "Cancelar" (cliente ainda não salvo não tem para onde voltar:
               // ali quem desiste fecha a janela).
-              if (abaAtual == 1 && editaServ && jaSalvo)
+              if (abaAtual == 1 && editaServ && jaSalvo && !carregandoServicos && !falhaServicos)
                 Botao.contorno(
                   'Cancelar',
                   icone: Icons.close,
@@ -3065,7 +3103,7 @@ void abrirCliente(
           lin(
             [
               // Editar <-> Salvar alternam conforme o modo DA ABA à vista.
-              if (!abaEmEdicao())
+              if (!abaEmEdicao() && (abaAtual == 0 || (!carregandoServicos && !falhaServicos)))
                 Botao.contorno(
                   'Editar',
                   desabilitado: abaAtual == 1 && !temServico(),
@@ -3086,7 +3124,7 @@ void abrirCliente(
                   altura: TamanhosServicosTributos.botaoEditar.altura,
                   idLayout: 'TamanhosServicosTributos.botaoEditar',
                 ),
-              if (abaEmEdicao())
+              if (abaEmEdicao() && (abaAtual == 0 || (!carregandoServicos && !falhaServicos)))
                 Botao(
                   'Salvar',
                   icone: Icons.save,
@@ -3113,7 +3151,13 @@ void abrirCliente(
     abrirCliente(app, doc, aba: abaDeAgora, slug: slugDeAgora);
     return true;
   };
+  void aoTrocarPrestador() {
+    if (app.prestador != p) app.fecharEsta(d);
+  }
+  app.aoTrocarPrestador.add(aoTrocarPrestador);
+  d.aoDescartar(() => app.aoTrocarPrestador.remove(aoTrocarPrestador));
   app.mostrarDialogo(d);
+  if (editando && !emLote) unawaited(lerServicos(slug ?? ''));
 }
 
 /// Exclui o CADASTRO do cliente (mantém as notas emitidas). Pede confirmação digitando o

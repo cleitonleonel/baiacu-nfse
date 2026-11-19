@@ -18,7 +18,49 @@ pub type Avisar<'a> = &'a dyn Fn(&Value);
 
 /// Chama e embrulha o resultado/erro no envelope; as chamadas demoradas avisam do andamento.
 pub fn chamar_avisando(metodo: &str, args: &Value, avisar: Avisar) -> Value {
+    envelope(com_acesso(metodo, || executar(metodo, args, avisar)))
+}
+
+#[cfg(windows)]
+pub(crate) fn chamar_local(metodo: &str, args: &Value, avisar: Avisar) -> Value {
     envelope(executar(metodo, args, avisar))
+}
+
+#[cfg(windows)]
+pub(crate) fn chamar_servico(
+    metodo: &str, args: &Value, avisar: Avisar, autorizar: impl FnOnce() -> Res<()>,
+) -> Value {
+    envelope(com_acesso(metodo, || {
+        autorizar()?;
+        executar(metodo, args, avisar)
+    }))
+}
+
+pub(crate) fn com_acesso<T>(metodo: &str, executar: impl FnOnce() -> Res<T>) -> Res<T> {
+    use crate::backup::{ACESSO, verificar_recuperacao};
+    if metodo == "registro.registrar" {
+        return executar();
+    }
+    if matches!(metodo, "backup.restaurar" | "banco.restaurar_de" | "nucleo.definir_raiz") {
+        let _exclusivo = ACESSO.try_write().or_else(|e| match e {
+            std::sync::TryLockError::Poisoned(p) => Ok(p.into_inner()),
+            std::sync::TryLockError::WouldBlock => Err(Erro::runtime(
+                "Há operações em andamento. Aguarde que terminem e tente novamente.",
+            )),
+        })?;
+        if metodo != "nucleo.definir_raiz" {
+            verificar_recuperacao()?;
+        }
+        return executar();
+    }
+    let _acesso = ACESSO.try_read().or_else(|e| match e {
+        std::sync::TryLockError::Poisoned(p) => Ok(p.into_inner()),
+        std::sync::TryLockError::WouldBlock => Err(Erro::runtime(
+            "A restauração do backup está em andamento. Tente novamente ao concluir.",
+        )),
+    })?;
+    verificar_recuperacao()?;
+    executar()
 }
 
 pub(crate) fn envelope(resultado: Res<Value>) -> Value {

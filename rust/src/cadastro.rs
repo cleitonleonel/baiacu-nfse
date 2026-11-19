@@ -2594,9 +2594,29 @@ pub fn list_servicos(prestador: &str, tomador: &str) -> Res<Vec<ServicoInfo>> {
 
 pub fn get_servico(prestador: &str, tomador: &str, servico: &str) -> Res<ServicoForm> {
     let cfg = ler(&servico_file(prestador, tomador, servico))?;
+    form_do_servico(&cfg)
+}
+
+pub fn formularios_servicos(prestador: &str, tomador: &str) -> Res<Vec<(String, ServicoForm)>> {
+    let dir = servicos_dir(prestador, tomador);
+    let mut servicos = Vec::new();
+    for (arquivo, cfg) in banco::load_inis(&dir)? {
+        let Some(slug) = arquivo.rsplit('/').next().and_then(|nome| nome.strip_suffix(".ini"))
+        else {
+            continue;
+        };
+        if slug.starts_with("serv") && arquivo == servico_file(prestador, tomador, slug) {
+            servicos.push((slug.to_string(), form_do_servico(&cfg)?));
+        }
+    }
+    servicos.sort_by_key(|(slug, _)| slug_num(slug));
+    Ok(servicos)
+}
+
+fn form_do_servico(cfg: &Ini) -> Res<ServicoForm> {
     match cfg.obter("gui.servico", "form_cadastro") {
         Some(form) => Ok(serde_json::from_str(form)?),
-        None => Ok(ServicoForm::from_config(&cfg)),
+        None => Ok(ServicoForm::from_config(cfg)),
     }
 }
 

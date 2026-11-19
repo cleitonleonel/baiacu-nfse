@@ -104,7 +104,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
     'vserv',
     'vliq',
   ];
-  static const _larguraPeriodo = 200.0;
+  static const _larguraPeriodo = larguraFiltroPeriodo;
   static const _dicaSinc =
       'Buscar no ADN as notas emitidas e recebidas que ainda não estão aqui';
 
@@ -598,6 +598,9 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
       }
       await _cuidar(); // confere o banco de notas e refaz a cópia se estiver velha
       _sincUi(false);
+      if (((tot?['novas'] as num?) ?? 0) + ((tot?['eventos'] as num?) ?? 0) > 0) {
+        app.notasMudaram();
+      }
       if (app.prestador == prest) carregarPagina();
     });
   }
@@ -624,7 +627,10 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
       for (final t in avisos) {
         if (ditos.add(t)) app.toast('Cofre: $t', erro: true);
       }
-      if (m['recuperado'] == true && app.navAtual == 4) carregarPagina();
+      if (m['recuperado'] == true || recuperacoes.isNotEmpty) {
+        app.notasMudaram();
+        if (app.navAtual == 4) carregarPagina();
+      }
     } catch (e) {
       // manutenção nunca derruba quem chamou
       registrar('Falha na manutenção do banco de notas: $e', nivel: 'error');
@@ -738,6 +744,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
         app.toast(
           'Cofre (sincronização automática): ${resumoDaSincronizacao(tot)}',
         );
+        app.notasMudaram();
         if (app.navAtual == 4) carregarPagina();
         await _cuidar();
       }
@@ -1727,7 +1734,7 @@ class CofreState extends State<TelaCofre> with TelaGuardada<TelaCofre> {
               ListaSuspensa(
                 estado: _ddBasePeriodo,
                 rotulo: 'Data',
-                largura: 154,
+                largura: larguraFiltroData,
                 aoSelecionar: (_) => _filtroMudou(),
                 idLayout: 'Cofre.filtrarPor',
               ),

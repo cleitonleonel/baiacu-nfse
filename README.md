@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="docs/imagens/capa.svg" alt="Baiacu NFS-e: nota fiscal de serviço em poucos cliques" width="100%">
+  <img src="../extras/docs/imagens/capa.svg" alt="Baiacu NFS-e: nota fiscal de serviço em poucos cliques" width="100%">
 </p>
 
 <p align="center">
   <a href="https://github.com/williamlala/baiacu-nfse/releases/latest"><img src="https://img.shields.io/badge/%E2%AC%87%20Baixar%20para%20Windows-4F46E5?style=for-the-badge" alt="Baixar para Windows"></a>
   &nbsp;
-  <a href="docs/Manual-Baiacu-NFS-e.pdf"><img src="https://img.shields.io/badge/Manual%20do%20usu%C3%A1rio%20(PDF)-F97316?style=for-the-badge" alt="Manual do usuário em PDF"></a>
+  <a href="../extras/docs/Manual-Baiacu-NFS-e.pdf"><img src="https://img.shields.io/badge/Manual%20do%20usu%C3%A1rio%20(PDF)-F97316?style=for-the-badge" alt="Manual do usuário em PDF"></a>
 </p>
 
 <p align="center">
-  <img src="docs/imagens/baiacu-nfse-demo-completo.gif" alt="Demonstração do Baiacu NFS-e: entrada, emissão, cofre de notas, PDF e e-mail" width="100%">
+  <img src="../extras/docs/imagens/baiacu-nfse-demo-completo.gif" alt="Demonstração do Baiacu NFS-e: entrada, emissão, dashboard, cofre de notas, PDF e e-mail" width="100%">
 </p>
 
 <p align="center">
@@ -27,25 +27,32 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 
 É **gratuito**, roda no **seu computador** e já está pronto para a **Reforma Tributária**.
 
-<p align="center">
-  <img src="docs/imagens/baiacu-em-dia.jpg" alt="O baiacu em dia com a Receita" width="100%">
-</p>
-
 ---
 
 ## 🚀 Como funciona
 
 <p align="center">
-  <img src="docs/imagens/como-funciona.svg" alt="1. Cadastre uma vez. 2. Emita em segundos. 3. O cliente recebe na hora." width="100%">
+  <img src="../extras/docs/imagens/como-funciona.svg" alt="1. Cadastre uma vez. 2. Emita em segundos. 3. O cliente recebe na hora." width="100%">
 </p>
 
 ---
 
 ## ✨ Tudo o que ele faz
 
+> As novas capturas usam dados fictícios e mostram a revisão local sobre a versão 1.0.0.5. O botão de download abre a distribuição publicada no GitHub.
+
 <p align="center">
-  <img src="docs/imagens/recursos.svg" alt="Recursos do Baiacu NFS-e" width="100%">
+  <img src="../extras/docs/imagens/recursos.svg" alt="Recursos do Baiacu NFS-e" width="100%">
 </p>
+
+### 📈 Dashboard de análise
+
+- Veja faturamento bruto, líquido das notas, tributos retidos e a participação de cada cliente no total do período.
+- Filtre por emissão ou competência. Em **Comparativo**, veja o faturamento bruto do recorte selecionado e dos mesmos dias ou meses nos três anos anteriores. Por exemplo, **Este mês** compara o mesmo mês de cada ano até a data de referência.
+- Passe o mouse para consultar um ponto e use a roda ou as lupas para ampliar. Os valores começam ocultos. O olho ao lado de **Visão financeira** revela ou oculta os números.
+- Os indicadores usam as NFS-e ativas de produção do Cofre para o prestador selecionado. Recebimentos efetivos, despesas e lucro dependem de registros próprios.
+
+![Dashboard com comparativo anual, tributos retidos e participação de clientes fictícios](../extras/docs/imagens/dashboard-financeiro.png)
 
 ### 🧾 Emitir notas sem dor de cabeça
 - **Escolha o cliente e o serviço.** Descrição, valor e tributos já vêm do cadastro; você só ajusta o que mudou.
@@ -57,11 +64,23 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 
 - **Escolha a data de competência** no calendário. A data de hoje vem preenchida.
 
+![Tela Emitir com cliente e serviço fictícios selecionados](../extras/docs/imagens/emitir-nfse.png)
+
 ### 📦 Emitir em lote
 
 - Salve um modelo por prestador e marque serviços de vários clientes de uma vez.
 - Confirme o envio e acompanhe a situação de cada nota. O histórico permite corrigir pendências, retransmitir e consultar o número das notas emitidas.
 - Exporte o histórico em PDF, Excel ou CSV, com opção de incluir XMLs e DANFSe disponíveis no Cofre.
+- Use o ícone **Importar/exportar lote** para transferir os modelos em JSON.
+
+![Emissão em lote simulada, com notas emitidas, a nota em processamento e a fila de espera](../extras/docs/imagens/emissao-em-lote.gif)
+
+<details>
+<summary><b>Ver o lote após a conclusão</b></summary>
+
+![Registro fictício das notas após a conclusão do lote](../extras/docs/imagens/lote-concluido.png)
+
+</details>
 
 ### 📇 Clientes e serviços organizados
 - Cadastre cada cliente **uma única vez**, junto com os serviços que você presta para ele.
@@ -69,6 +88,8 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 - Separe os clientes em **grupos** para achar todo mundo rápido.
 - **Importe e exporte clientes por planilha** (Excel, OpenDocument ou CSV). Baixe o modelo, preencha e veja uma prévia com os erros de cada linha antes de gravar. O CPF/CNPJ evita duplicados, e o município pode vir pelo código IBGE ou pela cidade e UF.
 - Já aceita o **novo CNPJ com letras e números**.
+
+![Aba Serviço e Tributação no cadastro de um cliente fictício](../extras/docs/imagens/cadastro-servico.png)
 
 ### 🏢 Uma empresa ou várias
 - Ideal para **contadores e escritórios**: cadastre vários prestadores, cada um com o próprio certificado digital, numeração e e-mail.
@@ -79,6 +100,8 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 - Procure qualquer nota por cliente, número, valor ou período. Em **Consultar** e no **Cofre**, escolha **Emissão** ou **Competência** para filtrar e exportar por essa data.
 - Gere o **PDF da nota (DANFSe)** quando quiser e baixe o **XML** a qualquer momento.
 - Exporte para **Excel** ou para um **relatório em PDF**, pronto para mandar ao contador.
+
+![Tela Consultar com filtro de período, notas fictícias e ações para XML e DANFSe](../extras/docs/imagens/consultar-nfse.png)
 
 ### ✉️ Envio por e-mail
 - A nota vai para o cliente **com o PDF e o XML anexados**, saindo do **seu próprio e-mail**.
@@ -122,7 +145,7 @@ O programa já sabe quem é o cliente, qual serviço você presta para ele e com
 5. Faça uma nota no **ambiente de testes**, que não tem valor fiscal, para ver como tudo funciona.
 6. Tudo certo? Mude para **produção** e comece a emitir. 🎉
 
-Ficou alguma dúvida? O [**manual do usuário**](docs/Manual-Baiacu-NFS-e.pdf) explica cada tela, passo a passo.
+Ficou alguma dúvida? O [**manual do usuário**](../extras/docs/Manual-Baiacu-NFS-e.pdf) explica cada tela, passo a passo.
 
 ---
 
@@ -173,13 +196,13 @@ Esse aviso (SmartScreen) aparece para programas novos que ainda não têm um cer
 <details>
 <summary><b>Como recebo as versões novas?</b></summary>
 <br>
-O programa procura versão nova sozinho, na frequência que você escolher em Configurações › Avançado › Atualizações: ao abrir o programa (a cada entrada), a cada hora, a cada 6 horas ou uma vez por dia (o padrão). A procura acontece 5 segundos depois de entrar. Quando houver, aparece um botão verde no topo. O pacote é autenticado por assinatura Ed25519 e instalado por um serviço sob demanda. O programa só reabre após a conclusão; se a instalação for interrompida, detecta a atualização pendente e oferece recuperar a versão anterior antes de carregar o núcleo. A recuperação de uma instalação compartilhada pode solicitar administrador. Quem só atualizou pelo botão desde a 1.0.0.2 deve executar o instalador mais recente uma vez, para ativar o serviço de dados; o programa avisa o usuário nível 4.
+O programa procura versão nova sozinho, na frequência que você escolher nas configurações.
 </details>
 
 <details>
 <summary><b>Várias pessoas usam o mesmo computador. Funciona?</b></summary>
 <br>
-Funciona. O programa fica protegido em Program Files, com bancos compartilhados em ProgramData. Desde a versão 1.0.0.3, o serviço **Baiacu NFSe - Dados** abre os bancos sob uma conta virtual própria. Para migrar uma instalação existente pela primeira vez, use o instalador mais recente. A edição portátil guarda os bancos junto do programa. O uso normal e as atualizações pelo serviço não pedem administrador; instalar, reparar um serviço ausente/desativado ou recuperar uma atualização interrompida pode exigir elevação. Cada pessoa entra com o próprio login no programa, com o nível de acesso dela. Para proteger os dados, ele só fica aberto por uma pessoa de cada vez naquele computador.
+Funciona. O programa fica protegido, com bancos compartilhados cifrados. Desde a versão 1.0.0.3, o serviço **Baiacu NFSe - Dados** abre os bancos sob uma conta virtual própria.
 </details>
 
 <details>
@@ -210,11 +233,11 @@ O Baiacu NFS-e é feito com carinho e distribuído de graça, sem anúncios e se
 
 <table>
   <tr><th></th><th align="left">Moeda</th><th align="left">Rede</th><th align="left">Endereço</th></tr>
-  <tr><td><img src="docs/imagens/cripto/btc.svg" width="28" alt="Bitcoin"></td><td><b>Bitcoin</b> (BTC)</td><td>Bitcoin</td><td><code>bc1qs4r3fpdmahvcm6pxd2r7ctn077ndxzqgn8ntvd</code></td></tr>
-  <tr><td><img src="docs/imagens/cripto/trx.svg" width="28" alt="Tron"></td><td><b>Tron</b> (TRX)</td><td>Tron</td><td><code>TV1YHohhftEayTmh1L63t5kCUqXgWt58K4</code></td></tr>
-  <tr><td><img src="docs/imagens/cripto/eth.svg" width="28" alt="Ethereum"></td><td><b>Ethereum</b> (ETH)</td><td>Ethereum</td><td><code>0xaB91d332f687D03EA45537A8c0fB0BcfedDf0fB1</code></td></tr>
-  <tr><td><img src="docs/imagens/cripto/sol.svg" width="28" alt="Solana"></td><td><b>Solana</b> (SOL)</td><td>Solana</td><td><code>CudVniUfVT5xtihXrDAa7wSr8m9wj416aeLTzD4MweKG</code></td></tr>
-  <tr><td><img src="docs/imagens/cripto/bnb.svg" width="28" alt="BNB"></td><td><b>BNB</b></td><td>BNB Smart Chain (BEP-20)</td><td><code>0xaB91d332f687D03EA45537A8c0fB0BcfedDf0fB1</code></td></tr>
+  <tr><td><img src="../extras/docs/imagens/cripto/btc.svg" width="28" alt="Bitcoin"></td><td><b>Bitcoin</b> (BTC)</td><td>Bitcoin</td><td><code>bc1qs4r3fpdmahvcm6pxd2r7ctn077ndxzqgn8ntvd</code></td></tr>
+  <tr><td><img src="../extras/docs/imagens/cripto/trx.svg" width="28" alt="Tron"></td><td><b>Tron</b> (TRX)</td><td>Tron</td><td><code>TV1YHohhftEayTmh1L63t5kCUqXgWt58K4</code></td></tr>
+  <tr><td><img src="../extras/docs/imagens/cripto/eth.svg" width="28" alt="Ethereum"></td><td><b>Ethereum</b> (ETH)</td><td>Ethereum</td><td><code>0xaB91d332f687D03EA45537A8c0fB0BcfedDf0fB1</code></td></tr>
+  <tr><td><img src="../extras/docs/imagens/cripto/sol.svg" width="28" alt="Solana"></td><td><b>Solana</b> (SOL)</td><td>Solana</td><td><code>CudVniUfVT5xtihXrDAa7wSr8m9wj416aeLTzD4MweKG</code></td></tr>
+  <tr><td><img src="../extras/docs/imagens/cripto/bnb.svg" width="28" alt="BNB"></td><td><b>BNB</b></td><td>BNB Smart Chain (BEP-20)</td><td><code>0xaB91d332f687D03EA45537A8c0fB0BcfedDf0fB1</code></td></tr>
 </table>
 
 > ⚠️ Envie cada moeda **somente pela rede indicada**. Uma rede diferente pode fazer a doação se perder.
